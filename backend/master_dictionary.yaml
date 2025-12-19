@@ -1,0 +1,32 @@
+# 正規化辞書
+# 化学物質名、試薬名、実験器具名などの表記揺れを統一するための辞書
+
+- canonical: 水酸化ナトリウム
+  variants:
+    - NaOH
+    - 苛性ソーダ
+  category: 試薬
+  note: 強塩基
+
+- canonical: 塩酸
+  variants:
+    - HCl
+    - 塩化水素水溶液
+  category: 試薬
+  note: 強酸
+
+- canonical: エタノール
+  variants:
+    - EtOH
+    - エチルアルコール
+    - 酒精
+  category: 溶媒
+  note: 有機溶媒
+
+- canonical: メタノール
+  variants:
+    - MeOH
+    - メチルアルコール
+    - 木精
+  category: 溶媒
+  note: 有機溶媒

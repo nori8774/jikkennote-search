@@ -1,0 +1,179 @@
+'use client';
+
+import { useState } from 'react';
+import { api } from '@/lib/api';
+import { storage } from '@/lib/storage';
+import Button from '@/components/Button';
+import ReactMarkdown from 'react-markdown';
+
+export default function SearchPage() {
+  const [purpose, setPurpose] = useState('');
+  const [materials, setMaterials] = useState('');
+  const [methods, setMethods] = useState('');
+  const [instruction, setInstruction] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState('');
+
+  const handleSearch = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      // APIキーをlocalStorageから取得
+      const openaiKey = storage.getOpenAIApiKey();
+      const cohereKey = storage.getCohereApiKey();
+
+      if (!openaiKey || !cohereKey) {
+        throw new Error('APIキーが設定されていません。設定ページで入力してください。');
+      }
+
+      const response = await api.search({
+        purpose,
+        materials,
+        methods,
+        instruction,
+        openai_api_key: openaiKey,
+        cohere_api_key: cohereKey,
+        embedding_model: storage.getEmbeddingModel() || undefined,
+        llm_model: storage.getLLMModel() || undefined,
+        custom_prompts: storage.getCustomPrompts() || undefined,
+      });
+
+      setResult(response);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopyMaterials = (doc: string) => {
+    // ノートから材料セクションを抽出してコピー
+    const materialsMatch = doc.match(/## 材料\n(.*?)\n##/s);
+    if (materialsMatch) {
+      setMaterials(materialsMatch[1].trim());
+    }
+  };
+
+  const handleCopyMethods = (doc: string) => {
+    // ノートから方法セクションを抽出してコピー
+    const methodsMatch = doc.match(/## 方法\n(.*?)(?:\n##|$)/s);
+    if (methodsMatch) {
+      setMethods(methodsMatch[1].trim());
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto p-8">
+        <h1 className="text-3xl font-bold mb-8">実験ノート検索</h1>
+
+        {/* 検索フォーム */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">目的・背景</label>
+              <textarea
+                className="w-full border border-gray-300 rounded-md p-3 h-24"
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="実験の目的や背景を入力..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">材料</label>
+              <textarea
+                className="w-full border border-gray-300 rounded-md p-3 h-32"
+                value={materials}
+                onChange={(e) => setMaterials(e.target.value)}
+                placeholder="使用する材料を入力..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">方法・手順</label>
+              <textarea
+                className="w-full border border-gray-300 rounded-md p-3 h-32"
+                value={methods}
+                onChange={(e) => setMethods(e.target.value)}
+                placeholder="実験の手順を入力..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">絞り込み指示（オプション）</label>
+              <input
+                type="text"
+                className="w-full border border-gray-300 rounded-md p-3"
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                placeholder="特定の条件で絞り込む場合は入力..."
+              />
+            </div>
+
+            <Button
+              onClick={handleSearch}
+              disabled={loading || !purpose || !materials || !methods}
+              className="w-full"
+            >
+              {loading ? '検索中...' : '検索'}
+            </Button>
+
+            {error && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                {error}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 検索結果 */}
+        {result && (
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-2xl font-bold mb-4">検索結果</h2>
+
+            {/* 比較分析レポート */}
+            <div className="mb-8 prose max-w-none">
+              <ReactMarkdown>{result.message}</ReactMarkdown>
+            </div>
+
+            {/* 検索されたノート */}
+            {result.retrieved_docs && result.retrieved_docs.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-xl font-bold mb-4">検索された実験ノート（上位3件）</h3>
+                {result.retrieved_docs.map((doc: string, index: number) => (
+                  <div key={index} className="border border-gray-300 rounded-lg p-4 mb-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="font-bold text-lg">ノート {index + 1}</h4>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleCopyMaterials(doc)}
+                          className="text-sm py-1 px-3"
+                        >
+                          材料をコピー
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleCopyMethods(doc)}
+                          className="text-sm py-1 px-3"
+                        >
+                          方法をコピー
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="prose max-w-none text-sm">
+                      <ReactMarkdown>{doc}</ReactMarkdown>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
