@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { api } from '@/lib/api';
 
 function ViewerContent() {
@@ -138,7 +139,7 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown>{sections.purpose}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.purpose}</ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -156,7 +157,7 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown>{sections.materials}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.materials}</ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -174,7 +175,7 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown>{sections.methods}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.methods}</ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -192,7 +193,7 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown>{sections.results}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.results}</ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -202,7 +203,31 @@ function ViewerContent() {
             <div className="mt-8 pt-8 border-t border-gray-300">
               <h3 className="text-lg font-bold mb-4">全文</h3>
               <div className="prose max-w-none">
-                <ReactMarkdown>{noteContent}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    table: ({node, ...props}) => (
+                      <table className="border-collapse border border-gray-300 w-full my-4" {...props} />
+                    ),
+                    thead: ({node, ...props}) => (
+                      <thead className="bg-gray-100" {...props} />
+                    ),
+                    th: ({node, ...props}) => (
+                      <th className="border border-gray-300 px-4 py-2 text-left font-semibold" {...props} />
+                    ),
+                    td: ({node, ...props}) => (
+                      <td className="border border-gray-300 px-4 py-2" {...props} />
+                    ),
+                    p: ({node, ...props}) => (
+                      <p className="whitespace-pre-wrap my-2" {...props} />
+                    ),
+                    br: ({node, ...props}) => (
+                      <br {...props} />
+                    ),
+                  }}
+                >
+                  {noteContent}
+                </ReactMarkdown>
               </div>
             </div>
           </div>

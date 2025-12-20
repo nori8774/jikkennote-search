@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { api } from '@/lib/api';
 
 interface SearchHistory {
@@ -221,7 +222,31 @@ export default function HistoryPage() {
 
                 {noteContent && !loading && (
                   <div className="prose max-w-none">
-                    <ReactMarkdown>{noteContent}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({node, ...props}) => (
+                          <table className="border-collapse border border-gray-300 w-full my-4" {...props} />
+                        ),
+                        thead: ({node, ...props}) => (
+                          <thead className="bg-gray-100" {...props} />
+                        ),
+                        th: ({node, ...props}) => (
+                          <th className="border border-gray-300 px-4 py-2 text-left font-semibold" {...props} />
+                        ),
+                        td: ({node, ...props}) => (
+                          <td className="border border-gray-300 px-4 py-2" {...props} />
+                        ),
+                        p: ({node, ...props}) => (
+                          <p className="whitespace-pre-wrap my-2" {...props} />
+                        ),
+                        br: ({node, ...props}) => (
+                          <br {...props} />
+                        ),
+                      }}
+                    >
+                      {noteContent}
+                    </ReactMarkdown>
                   </div>
                 )}
               </div>

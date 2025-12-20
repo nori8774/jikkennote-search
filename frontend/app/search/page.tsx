@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function SearchPage() {
   const [purpose, setPurpose] = useState('');
@@ -252,7 +253,31 @@ export default function SearchPage() {
 
                 {/* 比較分析レポート */}
                 <div className="mb-8 prose max-w-none">
-                  <ReactMarkdown>{result.message}</ReactMarkdown>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      table: ({node, ...props}) => (
+                        <table className="border-collapse border border-gray-300 w-full my-4" {...props} />
+                      ),
+                      thead: ({node, ...props}) => (
+                        <thead className="bg-gray-100" {...props} />
+                      ),
+                      th: ({node, ...props}) => (
+                        <th className="border border-gray-300 px-4 py-2 text-left font-semibold" {...props} />
+                      ),
+                      td: ({node, ...props}) => (
+                        <td className="border border-gray-300 px-4 py-2" {...props} />
+                      ),
+                      p: ({node, ...props}) => (
+                        <p className="whitespace-pre-wrap my-2" {...props} />
+                      ),
+                      br: ({node, ...props}) => (
+                        <br {...props} />
+                      ),
+                    }}
+                  >
+                    {result.message}
+                  </ReactMarkdown>
                 </div>
 
                 {/* 検索されたノート */}
@@ -320,7 +345,31 @@ export default function SearchPage() {
                             </div>
                           </div>
                           <div className="prose max-w-none text-sm">
-                            <ReactMarkdown>{doc}</ReactMarkdown>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                table: ({node, ...props}) => (
+                                  <table className="border-collapse border border-gray-300 w-full my-4" {...props} />
+                                ),
+                                thead: ({node, ...props}) => (
+                                  <thead className="bg-gray-100" {...props} />
+                                ),
+                                th: ({node, ...props}) => (
+                                  <th className="border border-gray-300 px-4 py-2 text-left font-semibold" {...props} />
+                                ),
+                                td: ({node, ...props}) => (
+                                  <td className="border border-gray-300 px-4 py-2" {...props} />
+                                ),
+                                p: ({node, ...props}) => (
+                                  <p className="whitespace-pre-wrap my-2" {...props} />
+                                ),
+                                br: ({node, ...props}) => (
+                                  <br {...props} />
+                                ),
+                              }}
+                            >
+                              {doc}
+                            </ReactMarkdown>
                           </div>
                         </div>
                       );
