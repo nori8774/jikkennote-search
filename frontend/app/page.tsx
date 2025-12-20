@@ -24,6 +24,15 @@ export default function Home() {
                 </div>
               </Link>
 
+              <Link href="/history">
+                <div className="border border-gray-300 rounded-lg p-6 hover:shadow-lg transition-shadow cursor-pointer">
+                  <h3 className="text-xl font-bold mb-2">📜 履歴</h3>
+                  <p className="text-text-secondary">
+                    過去の検索履歴を閲覧・再利用
+                  </p>
+                </div>
+              </Link>
+
               <Link href="/viewer">
                 <div className="border border-gray-300 rounded-lg p-6 hover:shadow-lg transition-shadow cursor-pointer">
                   <h3 className="text-xl font-bold mb-2">📄 ビューワー</h3>
@@ -47,6 +56,15 @@ export default function Home() {
                   <h3 className="text-xl font-bold mb-2">📚 辞書管理</h3>
                   <p className="text-text-secondary">
                     正規化辞書の閲覧・編集・エクスポート
+                  </p>
+                </div>
+              </Link>
+
+              <Link href="/evaluate">
+                <div className="border border-gray-300 rounded-lg p-6 hover:shadow-lg transition-shadow cursor-pointer">
+                  <h3 className="text-xl font-bold mb-2">📊 性能評価</h3>
+                  <p className="text-text-secondary">
+                    CSV取り込み・RAG性能評価
                   </p>
                 </div>
               </Link>

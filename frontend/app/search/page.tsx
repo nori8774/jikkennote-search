@@ -41,11 +41,53 @@ export default function SearchPage() {
       });
 
       setResult(response);
+
+      // 検索結果を履歴に保存
+      saveToHistory(response);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const saveToHistory = (response: any) => {
+    // 検索結果から上位10件のノートIDを抽出
+    const results = response.retrieved_docs?.slice(0, 10).map((doc: string, index: number) => {
+      // ノートIDを抽出（# ID から始まる行を探す）
+      const idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
+      const noteId = idMatch ? idMatch[1] : `note-${index + 1}`;
+
+      return {
+        noteId,
+        score: 1.0 - (index * 0.05), // 仮のスコア
+        rank: index + 1,
+      };
+    }) || [];
+
+    const history = {
+      id: Date.now().toString(),
+      timestamp: new Date(),
+      query: {
+        purpose,
+        materials,
+        methods,
+        instruction,
+      },
+      results,
+    };
+
+    // localStorageに保存
+    const stored = localStorage.getItem('search_histories');
+    const histories = stored ? JSON.parse(stored) : [];
+    histories.unshift(history); // 最新を先頭に追加
+
+    // 最大50件まで保存
+    if (histories.length > 50) {
+      histories.pop();
+    }
+
+    localStorage.setItem('search_histories', JSON.stringify(histories));
   };
 
   const handleCopyMaterials = (doc: string) => {
@@ -69,110 +111,122 @@ export default function SearchPage() {
       <div className="container mx-auto p-8">
         <h1 className="text-3xl font-bold mb-8">実験ノート検索</h1>
 
-        {/* 検索フォーム */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">目的・背景</label>
-              <textarea
-                className="w-full border border-gray-300 rounded-md p-3 h-24"
-                value={purpose}
-                onChange={(e) => setPurpose(e.target.value)}
-                placeholder="実験の目的や背景を入力..."
-              />
+        {/* 2カラムレイアウト */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 左側: 検索フォーム */}
+          <div className="bg-white rounded-lg shadow-lg p-6 h-fit sticky top-8">
+            <h2 className="text-xl font-bold mb-4">検索条件</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">目的・背景</label>
+                <textarea
+                  className="w-full border border-gray-300 rounded-md p-3 h-24 text-sm"
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  placeholder="実験の目的や背景を入力..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">材料</label>
+                <textarea
+                  className="w-full border border-gray-300 rounded-md p-3 h-32 text-sm"
+                  value={materials}
+                  onChange={(e) => setMaterials(e.target.value)}
+                  placeholder="使用する材料を入力..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">方法・手順</label>
+                <textarea
+                  className="w-full border border-gray-300 rounded-md p-3 h-32 text-sm"
+                  value={methods}
+                  onChange={(e) => setMethods(e.target.value)}
+                  placeholder="実験の手順を入力..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">絞り込み指示（オプション）</label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-md p-3 text-sm"
+                  value={instruction}
+                  onChange={(e) => setInstruction(e.target.value)}
+                  placeholder="特定の条件で絞り込む場合は入力..."
+                />
+              </div>
+
+              <Button
+                onClick={handleSearch}
+                disabled={loading || !purpose || !materials || !methods}
+                className="w-full"
+              >
+                {loading ? '検索中...' : '検索'}
+              </Button>
+
+              {error && (
+                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded text-sm">
+                  {error}
+                </div>
+              )}
             </div>
+          </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-2">材料</label>
-              <textarea
-                className="w-full border border-gray-300 rounded-md p-3 h-32"
-                value={materials}
-                onChange={(e) => setMaterials(e.target.value)}
-                placeholder="使用する材料を入力..."
-              />
-            </div>
+          {/* 右側: 検索結果 */}
+          <div>
+            {!result && (
+              <div className="bg-white rounded-lg shadow-lg p-8 text-center text-gray-500">
+                <p>検索条件を入力して検索ボタンをクリックしてください</p>
+              </div>
+            )}
 
-            <div>
-              <label className="block text-sm font-medium mb-2">方法・手順</label>
-              <textarea
-                className="w-full border border-gray-300 rounded-md p-3 h-32"
-                value={methods}
-                onChange={(e) => setMethods(e.target.value)}
-                placeholder="実験の手順を入力..."
-              />
-            </div>
+            {result && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <h2 className="text-2xl font-bold mb-4">検索結果</h2>
 
-            <div>
-              <label className="block text-sm font-medium mb-2">絞り込み指示（オプション）</label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded-md p-3"
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                placeholder="特定の条件で絞り込む場合は入力..."
-              />
-            </div>
+                {/* 比較分析レポート */}
+                <div className="mb-8 prose max-w-none">
+                  <ReactMarkdown>{result.message}</ReactMarkdown>
+                </div>
 
-            <Button
-              onClick={handleSearch}
-              disabled={loading || !purpose || !materials || !methods}
-              className="w-full"
-            >
-              {loading ? '検索中...' : '検索'}
-            </Button>
-
-            {error && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                {error}
+                {/* 検索されたノート */}
+                {result.retrieved_docs && result.retrieved_docs.length > 0 && (
+                  <div className="mt-8">
+                    <h3 className="text-xl font-bold mb-4">検索された実験ノート（上位3件）</h3>
+                    {result.retrieved_docs.map((doc: string, index: number) => (
+                      <div key={index} className="border border-gray-300 rounded-lg p-4 mb-4">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-bold text-lg">ノート {index + 1}</h4>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleCopyMaterials(doc)}
+                              className="text-sm py-1 px-3"
+                            >
+                              材料をコピー
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleCopyMethods(doc)}
+                              className="text-sm py-1 px-3"
+                            >
+                              方法をコピー
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="prose max-w-none text-sm">
+                          <ReactMarkdown>{doc}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
-
-        {/* 検索結果 */}
-        {result && (
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-4">検索結果</h2>
-
-            {/* 比較分析レポート */}
-            <div className="mb-8 prose max-w-none">
-              <ReactMarkdown>{result.message}</ReactMarkdown>
-            </div>
-
-            {/* 検索されたノート */}
-            {result.retrieved_docs && result.retrieved_docs.length > 0 && (
-              <div className="mt-8">
-                <h3 className="text-xl font-bold mb-4">検索された実験ノート（上位3件）</h3>
-                {result.retrieved_docs.map((doc: string, index: number) => (
-                  <div key={index} className="border border-gray-300 rounded-lg p-4 mb-4">
-                    <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-bold text-lg">ノート {index + 1}</h4>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleCopyMaterials(doc)}
-                          className="text-sm py-1 px-3"
-                        >
-                          材料をコピー
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleCopyMethods(doc)}
-                          className="text-sm py-1 px-3"
-                        >
-                          方法をコピー
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="prose max-w-none text-sm">
-                      <ReactMarkdown>{doc}</ReactMarkdown>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

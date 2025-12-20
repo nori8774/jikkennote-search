@@ -19,6 +19,7 @@ from dictionary import get_dictionary_manager
 from term_extractor import TermExtractor
 from history import get_history_manager
 from evaluation import get_evaluator
+from storage import storage
 
 app = FastAPI(
     title="実験ノート検索システム API",
@@ -357,10 +358,14 @@ async def get_note(note_id: str):
         # ノートファイルを検索（notes_new または notes_archive から）
         note_file = None
         for folder in [config.NOTES_NEW_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
-            potential_file = os.path.join(folder, f"{note_id}.md")
-            if os.path.exists(potential_file):
+            potential_file = f"{folder}/{note_id}.md"
+            try:
+                # storage抽象化レイヤーを使用してファイルの存在確認
+                storage.read_file(potential_file)
                 note_file = potential_file
                 break
+            except:
+                continue
 
         if not note_file:
             return NoteResponse(
@@ -368,9 +373,8 @@ async def get_note(note_id: str):
                 error=f"ノートが見つかりません: {note_id}"
             )
 
-        # ファイルを読み込み
-        with open(note_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+        # ファイルを読み込み（storage抽象化レイヤーを使用）
+        content = storage.read_file(note_file)
 
         # セクションを抽出
         def extract_section(pattern: str, text: str) -> Optional[str]:
@@ -410,7 +414,29 @@ async def analyze_new_terms(request: AnalyzeRequest):
 
         all_new_terms = []
 
-        for note_id, note_content in zip(request.note_ids, request.note_contents):
+        # note_contentsが提供されていない、または空の場合はnote_idsから読み込む
+        note_contents = request.note_contents
+        if not note_contents or len(note_contents) == 0:
+            note_contents = []
+            for note_id in request.note_ids:
+                # ノートファイルを検索
+                note_file = None
+                for folder in [config.NOTES_NEW_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
+                    potential_file = f"{folder}/{note_id}.md"
+                    try:
+                        content = storage.read_file(potential_file)
+                        note_contents.append(content)
+                        break
+                    except:
+                        continue
+
+                if len(note_contents) < len(request.note_ids):
+                    # ノートが見つからなかった場合は空文字列を追加
+                    note_contents.append('')
+
+        for note_id, note_content in zip(request.note_ids, note_contents):
+            if not note_content:
+                continue
             result = extractor.analyze_note(note_id, note_content)
             if result.get('new_terms'):
                 all_new_terms.extend(result['new_terms'])
@@ -422,6 +448,8 @@ async def analyze_new_terms(request: AnalyzeRequest):
 
     except Exception as e:
         print(f"Error in analyze: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"新出単語分析エラー: {str(e)}")
 
 
