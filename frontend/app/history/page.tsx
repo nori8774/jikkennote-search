@@ -5,6 +5,7 @@ import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { api } from '@/lib/api';
 
 interface SearchHistory {
@@ -224,6 +225,7 @@ export default function HistoryPage() {
                   <div className="prose max-w-none">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
                       components={{
                         table: ({node, ...props}) => (
                           <table className="border-collapse border border-gray-300 w-full my-4" {...props} />

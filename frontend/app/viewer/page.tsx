@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { api } from '@/lib/api';
 
 function ViewerContent() {
@@ -139,7 +140,12 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.purpose}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
+                    >
+                      {sections.purpose}
+                    </ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -157,7 +163,12 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.materials}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
+                    >
+                      {sections.materials}
+                    </ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -175,7 +186,12 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.methods}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
+                    >
+                      {sections.methods}
+                    </ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -193,7 +209,12 @@ function ViewerContent() {
                     </Button>
                   </div>
                   <div className="prose max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sections.results}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
+                    >
+                      {sections.results}
+                    </ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -205,6 +226,7 @@ function ViewerContent() {
               <div className="prose max-w-none">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw]}
                   components={{
                     table: ({node, ...props}) => (
                       <table className="border-collapse border border-gray-300 w-full my-4" {...props} />

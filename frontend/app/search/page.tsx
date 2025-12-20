@@ -6,6 +6,7 @@ import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 
 export default function SearchPage() {
   const [purpose, setPurpose] = useState('');
@@ -255,6 +256,7 @@ export default function SearchPage() {
                 <div className="mb-8 prose max-w-none">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw]}
                     components={{
                       table: ({node, ...props}) => (
                         <table className="border-collapse border border-gray-300 w-full my-4" {...props} />
@@ -347,6 +349,7 @@ export default function SearchPage() {
                           <div className="prose max-w-none text-sm">
                             <ReactMarkdown
                               remarkPlugins={[remarkGfm]}
+                              rehypePlugins={[rehypeRaw]}
                               components={{
                                 table: ({node, ...props}) => (
                                   <table className="border-collapse border border-gray-300 w-full my-4" {...props} />
