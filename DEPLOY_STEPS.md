@@ -266,7 +266,7 @@ gcloud run services delete jikkennote-backend \
 - [x] イメージが Artifact Registry にプッシュされた
 - [x] Cloud Run にデプロイされた
 - [x] バックエンドのヘルスチェックが成功する
-- [ ] GitHub にコードがプッシュされた
+- [x] GitHub にコードがプッシュされた (https://github.com/nori8774/jikkennote-search)
 - [ ] Vercel にフロントエンドがデプロイされた
 - [ ] フロントエンドからバックエンドに接続できる
 - [ ] CORS設定が正しい
