@@ -261,11 +261,11 @@ gcloud run services delete jikkennote-backend \
 
 デプロイが完了したら：
 
-- [ ] Docker Desktop が起動している
-- [ ] Docker イメージがビルドされた
-- [ ] イメージが Artifact Registry にプッシュされた
-- [ ] Cloud Run にデプロイされた
-- [ ] バックエンドのヘルスチェックが成功する
+- [x] Docker Desktop が起動している
+- [x] Docker イメージがビルドされた
+- [x] イメージが Artifact Registry にプッシュされた
+- [x] Cloud Run にデプロイされた
+- [x] バックエンドのヘルスチェックが成功する
 - [ ] GitHub にコードがプッシュされた
 - [ ] Vercel にフロントエンドがデプロイされた
 - [ ] フロントエンドからバックエンドに接続できる
