@@ -141,7 +141,7 @@ export default function DictionaryPage() {
             {/* インポート */}
             <div>
               <label className="cursor-pointer">
-                <Button variant="secondary" as="span" className="text-sm">
+                <Button variant="secondary" className="text-sm" type="button">
                   インポート
                 </Button>
                 <input

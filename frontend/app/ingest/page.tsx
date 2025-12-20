@@ -136,7 +136,7 @@ export default function IngestPage() {
         .filter(term => term.user_decision !== 'skip')
         .map(term => ({
           term: term.term,
-          decision: term.user_decision!,
+          decision: term.user_decision! as 'variant' | 'new',
           canonical: term.user_canonical,
           category: term.user_category,
           note: term.llm_suggestion.reason,
