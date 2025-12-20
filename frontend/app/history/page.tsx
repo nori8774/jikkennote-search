@@ -86,9 +86,26 @@ export default function HistoryPage() {
       <div className="container mx-auto p-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">検索履歴</h1>
-          <Button variant="secondary" onClick={handleClearAll}>
-            すべて削除
-          </Button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                const stored = localStorage.getItem('search_histories');
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  console.log('検索履歴:', parsed);
+                  alert(`検索履歴: ${parsed.length}件\n最新の履歴の結果数: ${parsed[0]?.results?.length || 0}件\nConsoleに詳細を出力しました。F12キーを押してConsoleタブを確認してください。`);
+                } else {
+                  alert('検索履歴がありません');
+                }
+              }}
+              className="text-sm text-blue-600 underline"
+            >
+              デバッグ情報
+            </button>
+            <Button variant="secondary" onClick={handleClearAll}>
+              すべて削除
+            </Button>
+          </div>
         </div>
 
         {histories.length === 0 ? (
@@ -128,25 +145,32 @@ export default function HistoryPage() {
                     </td>
                     <td className="px-6 py-4 text-sm">
                       <div className="flex flex-wrap gap-1">
-                        {history.results.slice(0, 10).map((result) => (
-                          <button
-                            key={result.noteId}
-                            onClick={(e) => {
-                              if (e.ctrlKey || e.metaKey) {
-                                // Ctrl/Cmdクリックで新しいタブで開く
-                                window.open(`/viewer?id=${result.noteId}`, '_blank');
-                              } else {
-                                // 通常クリックでモーダル表示
-                                handleViewNote(result.noteId);
-                              }
-                            }}
-                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200 cursor-pointer"
-                            title="クリック: モーダル表示 | Ctrl+クリック: 新しいタブで開く"
-                          >
-                            {result.noteId}
-                          </button>
-                        ))}
+                        {history.results && history.results.length > 0 ? (
+                          history.results.slice(0, 10).map((result, idx) => (
+                            <button
+                              key={`${result.noteId}-${idx}`}
+                              onClick={(e) => {
+                                if (e.ctrlKey || e.metaKey) {
+                                  // Ctrl/Cmdクリックで新しいタブで開く
+                                  window.open(`/viewer?id=${result.noteId}`, '_blank');
+                                } else {
+                                  // 通常クリックでモーダル表示
+                                  handleViewNote(result.noteId);
+                                }
+                              }}
+                              className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200 cursor-pointer"
+                              title="クリック: モーダル表示 | Ctrl+クリック: 新しいタブで開く"
+                            >
+                              {result.noteId}
+                            </button>
+                          ))
+                        ) : (
+                          <span className="text-gray-400 text-xs">ノートIDが記録されていません</span>
+                        )}
                       </div>
+                      {history.results && history.results.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-1">{history.results.length}件</p>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <Button

@@ -14,6 +14,7 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
+  const [copySuccess, setCopySuccess] = useState('');
 
   const handleSearch = async () => {
     setError('');
@@ -62,9 +63,38 @@ export default function SearchPage() {
   const saveToHistory = (response: any) => {
     // 検索結果から上位10件のノートIDを抽出
     const results = response.retrieved_docs?.slice(0, 10).map((doc: string, index: number) => {
-      // ノートIDを抽出（# ID から始まる行を探す）
-      const idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
-      const noteId = idMatch ? idMatch[1] : `note-${index + 1}`;
+      // ノートIDを抽出（複数のパターンを試す）
+      let noteId = null;
+
+      // パターン1: # ID1-2 形式
+      let idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
+      if (idMatch) {
+        noteId = idMatch[1];
+      }
+
+      // パターン2: ## ID1-2 形式
+      if (!noteId) {
+        idMatch = doc.match(/^##\s+(ID[\d-]+)/m);
+        if (idMatch) {
+          noteId = idMatch[1];
+        }
+      }
+
+      // パターン3: 任意の位置の # ID1-2
+      if (!noteId) {
+        idMatch = doc.match(/#+\s+(ID[\d-]+)/);
+        if (idMatch) {
+          noteId = idMatch[1];
+        }
+      }
+
+      // デバッグ用
+      if (!noteId) {
+        console.log('ノートIDを抽出できませんでした:', doc.substring(0, 100));
+        noteId = `note-${index + 1}`;
+      } else {
+        console.log(`ノート${index + 1}のID:`, noteId);
+      }
 
       return {
         noteId,
@@ -72,6 +102,8 @@ export default function SearchPage() {
         rank: index + 1,
       };
     }) || [];
+
+    console.log('履歴に保存するノートID:', results.map(r => r.noteId));
 
     const history = {
       id: Date.now().toString(),
@@ -103,6 +135,11 @@ export default function SearchPage() {
     const materialsMatch = doc.match(/## 材料\n(.*?)\n##/s);
     if (materialsMatch) {
       setMaterials(materialsMatch[1].trim());
+      setCopySuccess('材料を検索条件にコピーしました');
+      setTimeout(() => setCopySuccess(''), 3000);
+    } else {
+      setCopySuccess('材料セクションが見つかりませんでした');
+      setTimeout(() => setCopySuccess(''), 3000);
     }
   };
 
@@ -111,6 +148,11 @@ export default function SearchPage() {
     const methodsMatch = doc.match(/## 方法\n(.*?)(?:\n##|$)/s);
     if (methodsMatch) {
       setMethods(methodsMatch[1].trim());
+      setCopySuccess('方法を検索条件にコピーしました');
+      setTimeout(() => setCopySuccess(''), 3000);
+    } else {
+      setCopySuccess('方法セクションが見つかりませんでした');
+      setTimeout(() => setCopySuccess(''), 3000);
     }
   };
 
@@ -177,6 +219,12 @@ export default function SearchPage() {
               {error && (
                 <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded text-sm">
                   {error}
+                </div>
+              )}
+
+              {copySuccess && (
+                <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded text-sm">
+                  {copySuccess}
                 </div>
               )}
             </div>
