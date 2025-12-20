@@ -66,13 +66,21 @@ export default function SearchPage() {
       // ノートIDを抽出（複数のパターンを試す）
       let noteId = null;
 
-      // パターン1: # ID1-2 形式
-      let idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
+      // パターン1: 【実験ノートID: ID1-2】 形式（バックエンドの標準形式）
+      let idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/);
       if (idMatch) {
         noteId = idMatch[1];
       }
 
-      // パターン2: ## ID1-2 形式
+      // パターン2: # ID1-2 形式（Markdown見出し）
+      if (!noteId) {
+        idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
+        if (idMatch) {
+          noteId = idMatch[1];
+        }
+      }
+
+      // パターン3: ## ID1-2 形式
       if (!noteId) {
         idMatch = doc.match(/^##\s+(ID[\d-]+)/m);
         if (idMatch) {
@@ -80,17 +88,17 @@ export default function SearchPage() {
         }
       }
 
-      // パターン3: 任意の位置の # ID1-2
+      // パターン4: 任意の位置の ID1-2 パターン
       if (!noteId) {
-        idMatch = doc.match(/#+\s+(ID[\d-]+)/);
+        idMatch = doc.match(/ID\d+-\d+/);
         if (idMatch) {
-          noteId = idMatch[1];
+          noteId = idMatch[0];
         }
       }
 
       // デバッグ用
       if (!noteId) {
-        console.log('ノートIDを抽出できませんでした:', doc.substring(0, 100));
+        console.log('ノートIDを抽出できませんでした:', doc.substring(0, 200));
         noteId = `note-${index + 1}`;
       } else {
         console.log(`ノート${index + 1}のID:`, noteId);
@@ -103,7 +111,7 @@ export default function SearchPage() {
       };
     }) || [];
 
-    console.log('履歴に保存するノートID:', results.map(r => r.noteId));
+    console.log('履歴に保存するノートID:', results.map((r: any) => r.noteId));
 
     const history = {
       id: Date.now().toString(),
@@ -252,9 +260,30 @@ export default function SearchPage() {
                   <div className="mt-8">
                     <h3 className="text-xl font-bold mb-4">検索された実験ノート（上位3件）</h3>
                     {result.retrieved_docs.map((doc: string, index: number) => {
-                      // ノートIDを抽出
-                      const idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
-                      const noteId = idMatch ? idMatch[1] : null;
+                      // ノートIDを抽出（複数のパターンを試す）
+                      let noteId = null;
+
+                      // パターン1: 【実験ノートID: ID1-2】 形式
+                      let idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/);
+                      if (idMatch) {
+                        noteId = idMatch[1];
+                      }
+
+                      // パターン2: # ID1-2 形式
+                      if (!noteId) {
+                        idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
+                        if (idMatch) {
+                          noteId = idMatch[1];
+                        }
+                      }
+
+                      // パターン3: ID1-2 パターン
+                      if (!noteId) {
+                        idMatch = doc.match(/ID\d+-\d+/);
+                        if (idMatch) {
+                          noteId = idMatch[0];
+                        }
+                      }
 
                       return (
                         <div key={index} className="border border-gray-300 rounded-lg p-4 mb-4">
