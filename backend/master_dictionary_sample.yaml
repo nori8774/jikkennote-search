@@ -1,0 +1,21 @@
+- canonical: "水酸化ナトリウム"
+  variants:
+    - "NaOH"
+    - "苛性ソーダ"
+  category: "試薬"
+  note: "強アルカリ性の試薬"
+
+- canonical: "塩化ナトリウム"
+  variants:
+    - "NaCl"
+    - "食塩"
+  category: "試薬"
+  note: "一般的な塩"
+
+- canonical: "エタノール"
+  variants:
+    - "EtOH"
+    - "エチルアルコール"
+    - "ethanol"
+  category: "溶媒"
+  note: "一般的な有機溶媒"

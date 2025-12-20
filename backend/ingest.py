@@ -5,8 +5,6 @@ Ingest notes into vector database
 """
 import os
 import re
-import glob
-import shutil
 from typing import Dict, List, Tuple
 from pathlib import Path
 
@@ -16,14 +14,16 @@ from langchain_core.documents import Document
 
 from config import config
 from utils import load_master_dict, normalize_text
+from storage import storage
+from chroma_sync import get_chroma_vectorstore, sync_chroma_to_gcs
 
 
 def parse_markdown_note(file_path: str, norm_map: dict) -> Dict:
     """マークダウンノートをパースして構造化データを返す"""
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    content = storage.read_file(file_path)
 
-    note_id = os.path.basename(file_path).replace('.md', '')
+    # パスから最後の部分を取得してノートIDに
+    note_id = file_path.split('/')[-1].replace('.md', '')
 
     # 材料セクションから検索用キーワードを抽出して正規化
     materials_match = re.search(r'## 材料\n(.*?)\n##', content, re.DOTALL)
@@ -93,34 +93,29 @@ def ingest_notes(
     archive_folder = archive_folder or config.NOTES_ARCHIVE_FOLDER
     embedding_model = embedding_model or config.DEFAULT_EMBEDDING_MODEL
 
-    # フォルダ確認
-    if not os.path.exists(source_folder):
-        raise FileNotFoundError(f"Source folder not found: {source_folder}")
+    # フォルダ確認（ストレージ抽象化に対応）
+    storage.mkdir(source_folder)
 
     # 正規化辞書のロード
     norm_map, _ = load_master_dict()
     print(f"正規化辞書ロード: {len(norm_map)} エントリ")
 
-    # ChromaDBの初期化
+    # ChromaDBの初期化（GCS同期付き）
     embeddings = OpenAIEmbeddings(model=embedding_model, api_key=api_key)
-    vectorstore = Chroma(
-        collection_name="experiment_notes",
-        embedding_function=embeddings,
-        persist_directory=config.CHROMA_DB_FOLDER
-    )
+    vectorstore = get_chroma_vectorstore(embeddings)
 
     # 既存データの確認（増分更新のため）
     existing_ids = get_existing_ids(vectorstore)
     print(f"既存の登録ノート数: {len(existing_ids)}")
 
     # ファイルスキャンと新規判定
-    files = glob.glob(os.path.join(source_folder, "*.md"))
+    files = storage.list_files(prefix=source_folder, pattern="*.md")
     new_docs = []
     skipped_ids = []
     new_ids = []
 
     for file in files:
-        note_id = os.path.basename(file).replace('.md', '')
+        note_id = file.split('/')[-1].replace('.md', '')
 
         # 既にDBにあるIDならスキップ
         if note_id in existing_ids:
@@ -147,19 +142,22 @@ def ingest_notes(
         vectorstore.add_documents(documents=new_docs)
         print("登録完了。")
 
+        # GCSに同期（本番環境のみ）
+        sync_chroma_to_gcs()
+
         # ファイル処理（post_action に応じて）
         for note_id in new_ids:
-            file_path = os.path.join(source_folder, f"{note_id}.md")
+            file_path = f"{source_folder}/{note_id}.md"
 
             if post_action == 'delete':
-                os.remove(file_path)
+                storage.delete_file(file_path)
                 print(f"  Deleted: {file_path}")
 
             elif post_action == 'archive':
                 # アーカイブフォルダ作成
-                Path(archive_folder).mkdir(parents=True, exist_ok=True)
-                dest_path = os.path.join(archive_folder, f"{note_id}.md")
-                shutil.move(file_path, dest_path)
+                storage.mkdir(archive_folder)
+                dest_path = f"{archive_folder}/{note_id}.md"
+                storage.move_file(file_path, dest_path)
                 print(f"  Archived: {file_path} -> {dest_path}")
 
             elif post_action == 'keep':

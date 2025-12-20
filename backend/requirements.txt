@@ -16,6 +16,9 @@ chromadb==0.5.23
 # Cohere (for reranking)
 cohere==5.13.4
 
+# Google Cloud Storage
+google-cloud-storage==2.14.0
+
 # Other utilities
 python-dotenv==1.0.1
 pyyaml==6.0.2

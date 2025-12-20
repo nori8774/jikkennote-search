@@ -268,9 +268,9 @@ gcloud run services delete jikkennote-backend \
 - [x] バックエンドのヘルスチェックが成功する
 - [x] GitHub にコードがプッシュされた (https://github.com/nori8774/jikkennote-search)
 - [x] Vercel にフロントエンドがデプロイされた (https://jikkennote-search.vercel.app)
-- [ ] フロントエンドからバックエンドに接続できる
+- [x] フロントエンドからバックエンドに接続できる
 - [x] CORS設定が正しい
-- [ ] APIキーが設定されている
+- [x] APIキーが設定されている
 - [ ] 検索機能が動作する
 
 ---

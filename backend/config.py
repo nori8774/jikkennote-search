@@ -11,11 +11,11 @@ load_dotenv()
 class Config:
     """アプリケーション設定"""
 
-    # フォルダパス設定
-    NOTES_NEW_FOLDER = os.getenv("NOTES_NEW_FOLDER", "./notes/new")
-    NOTES_ARCHIVE_FOLDER = os.getenv("NOTES_ARCHIVE_FOLDER", "./notes/archived")
-    CHROMA_DB_FOLDER = os.getenv("CHROMA_DB_FOLDER", "./chroma_db")
-    MASTER_DICTIONARY_PATH = os.getenv("MASTER_DICTIONARY_PATH", "./master_dictionary.yaml")
+    # フォルダパス設定（GCS環境では "notes/new" のようにパスを指定）
+    NOTES_NEW_FOLDER = os.getenv("NOTES_NEW_FOLDER", "notes/new")
+    NOTES_ARCHIVE_FOLDER = os.getenv("NOTES_ARCHIVE_FOLDER", "notes/archived")
+    CHROMA_DB_FOLDER = os.getenv("CHROMA_DB_FOLDER", "/tmp/chroma_db")
+    MASTER_DICTIONARY_PATH = os.getenv("MASTER_DICTIONARY_PATH", "master_dictionary.yaml")
 
     # デフォルトモデル設定
     DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"

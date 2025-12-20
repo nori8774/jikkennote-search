@@ -19,6 +19,7 @@ from dataclasses import dataclass, asdict
 from io import StringIO
 
 import config
+from storage import storage
 
 
 @dataclass
@@ -62,13 +63,13 @@ class DictionaryManager:
 
     def load(self):
         """YAML辞書を読み込む"""
-        if not os.path.exists(self.dictionary_path):
+        if not storage.exists(self.dictionary_path):
             print(f"辞書ファイルが見つかりません: {self.dictionary_path}")
             return
 
         try:
-            with open(self.dictionary_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or []
+            content = storage.read_file(self.dictionary_path)
+            data = yaml.safe_load(content) or []
 
             self.entries = []
             for item in data:
@@ -92,16 +93,15 @@ class DictionaryManager:
         """YAML辞書を保存"""
         try:
             # バックアップ作成
-            if os.path.exists(self.dictionary_path):
+            if storage.exists(self.dictionary_path):
                 backup_path = f"{self.dictionary_path}.backup"
-                with open(self.dictionary_path, 'r', encoding='utf-8') as src:
-                    with open(backup_path, 'w', encoding='utf-8') as dst:
-                        dst.write(src.read())
+                content = storage.read_file(self.dictionary_path)
+                storage.write_file(backup_path, content)
 
             # 保存
             data = [entry.to_dict() for entry in self.entries]
-            with open(self.dictionary_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            yaml_content = yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            storage.write_file(self.dictionary_path, yaml_content)
 
             print(f"辞書を保存しました: {len(self.entries)}エントリ")
             return True

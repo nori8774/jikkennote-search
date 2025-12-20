@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 from config import config
+from storage import storage
 
 
 def load_master_dict(path: str = None) -> Tuple[Dict[str, str], Set[str]]:
@@ -20,12 +21,12 @@ def load_master_dict(path: str = None) -> Tuple[Dict[str, str], Set[str]]:
     2. known_terms: 未知語チェック用セット { "水酸化ナトリウム", "NaOH", ... }
     """
     if path is None:
-        path = config.MASTER_DICT_PATH
+        path = config.MASTER_DICTIONARY_PATH
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or []
-    except FileNotFoundError:
+        content = storage.read_file(path)
+        data = yaml.safe_load(content) or []
+    except Exception:
         return {}, set()
 
     replace_map = {}

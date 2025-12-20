@@ -18,6 +18,7 @@ import cohere
 from config import config
 from utils import load_master_dict, normalize_text
 from prompts import get_default_prompt
+from chroma_sync import get_chroma_vectorstore
 
 
 # --- State定義 ---
@@ -81,12 +82,8 @@ class SearchAgent:
             api_key=self.openai_api_key
         )
 
-        # Vector Store
-        self.vectorstore = Chroma(
-            collection_name="experiment_notes",
-            embedding_function=self.embedding_function,
-            persist_directory=config.CHROMA_DB_FOLDER
-        )
+        # Vector Store（GCS同期付き）
+        self.vectorstore = get_chroma_vectorstore(self.embedding_function)
 
         # LLM
         self.llm = ChatOpenAI(
