@@ -24,8 +24,16 @@ export default function SearchPage() {
       const openaiKey = storage.getOpenAIApiKey();
       const cohereKey = storage.getCohereApiKey();
 
+      // デバッグ: APIキーの形式を確認
+      console.log('OpenAI APIキー:', openaiKey ? `${openaiKey.substring(0, 10)}...${openaiKey.substring(openaiKey.length - 4)}` : '未設定');
+      console.log('sk-proj-で始まっている:', openaiKey?.startsWith('sk-proj-'));
+
       if (!openaiKey || !cohereKey) {
         throw new Error('APIキーが設定されていません。設定ページで入力してください。');
+      }
+
+      if (!openaiKey.startsWith('sk-proj-')) {
+        throw new Error('OpenAI APIキーの形式が正しくありません。「sk-proj-」で始まるキーを設定してください。現在: ' + openaiKey.substring(0, 10) + '...');
       }
 
       const response = await api.search({

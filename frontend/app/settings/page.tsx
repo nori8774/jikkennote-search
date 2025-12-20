@@ -106,11 +106,21 @@ export default function SettingsPage() {
                   className="w-full border border-gray-300 rounded-md p-3"
                   value={openaiKey}
                   onChange={(e) => setOpenaiKey(e.target.value)}
-                  placeholder="sk-..."
+                  placeholder="sk-proj-..."
                 />
                 <p className="text-sm text-gray-600 mt-1">
-                  ブラウザのlocalStorageに保存されます。
+                  ブラウザのlocalStorageに保存されます。必ず「sk-proj-」で始まるキーを入力してください。
                 </p>
+                {openaiKey && (
+                  <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-300">
+                    <p className="text-xs font-mono">
+                      現在の値: {openaiKey.substring(0, 10)}...{openaiKey.substring(openaiKey.length - 4)}
+                    </p>
+                    <p className={`text-xs mt-1 ${openaiKey.startsWith('sk-proj-') ? 'text-green-600' : 'text-red-600'}`}>
+                      {openaiKey.startsWith('sk-proj-') ? '✓ 形式が正しいです' : '✗ 「sk-proj-」で始まっていません'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -125,6 +135,27 @@ export default function SettingsPage() {
                 <p className="text-sm text-gray-600 mt-1">
                   リランキングに使用されます。
                 </p>
+                {cohereKey && (
+                  <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-300">
+                    <p className="text-xs font-mono">
+                      現在の値: {cohereKey.substring(0, 8)}...{cohereKey.substring(cohereKey.length - 4)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* デバッグ情報 */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded">
+                <h3 className="font-bold text-sm mb-2">保存状態の確認</h3>
+                <button
+                  onClick={() => {
+                    const saved = localStorage.getItem('openai_api_key');
+                    alert(`保存されているOpenAI APIキー:\n${saved ? saved.substring(0, 10) + '...' + saved.substring(saved.length - 4) : '未設定'}\n\nsk-proj-で始まっている: ${saved?.startsWith('sk-proj-') ? 'はい' : 'いいえ'}`);
+                  }}
+                  className="text-sm text-blue-600 underline"
+                >
+                  localStorageを確認
+                </button>
               </div>
             </div>
           )}
