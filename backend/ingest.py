@@ -136,10 +136,27 @@ def ingest_notes(
         new_docs.append(Document(page_content=data["full_content"], metadata=metadata))
         new_ids.append(note_id)
 
-    # DBへの追加登録
+    # DBへの追加登録（バッチ処理）
     if new_docs:
         print(f"{len(new_docs)} 件の新規ノートをデータベースに追加しています...")
-        vectorstore.add_documents(documents=new_docs)
+
+        # バッチサイズ（トークン制限を考慮して50件ずつ処理）
+        BATCH_SIZE = 50
+        total_batches = (len(new_docs) + BATCH_SIZE - 1) // BATCH_SIZE
+
+        for i in range(0, len(new_docs), BATCH_SIZE):
+            batch = new_docs[i:i + BATCH_SIZE]
+            batch_num = (i // BATCH_SIZE) + 1
+            print(f"  バッチ {batch_num}/{total_batches}: {len(batch)}件を処理中...")
+
+            try:
+                vectorstore.add_documents(documents=batch)
+                print(f"  バッチ {batch_num}/{total_batches}: 完了")
+            except Exception as e:
+                print(f"  バッチ {batch_num}/{total_batches}: エラー - {str(e)}")
+                # エラーが出てもそのバッチをスキップして続行
+                continue
+
         print("登録完了。")
 
         # GCSに同期（本番環境のみ）
