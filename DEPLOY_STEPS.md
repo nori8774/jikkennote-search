@@ -9,6 +9,10 @@
 3. ✅ 必要なAPIの有効化
 4. ✅ Artifact Registry リポジトリ作成（jikkennote-repo）
 5. ✅ Docker 認証設定
+6. ✅ Dockerイメージのビルドとプッシュ
+7. ✅ Cloud Runへのデプロイ完了
+
+**バックエンドURL**: https://jikkennote-backend-285071263188.asia-northeast1.run.app
 
 ### 次に実行する作業
 

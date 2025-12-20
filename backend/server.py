@@ -222,7 +222,7 @@ async def health_check():
             "notes_new": config.NOTES_NEW_FOLDER,
             "notes_archive": config.NOTES_ARCHIVE_FOLDER,
             "chroma_db": config.CHROMA_DB_FOLDER,
-            "master_dict": config.MASTER_DICT_PATH,
+            "master_dict": config.MASTER_DICTIONARY_PATH,
         }
     )
 
