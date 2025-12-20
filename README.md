@@ -84,29 +84,44 @@ UIは http://localhost:3000 で起動します。
 
 本番環境へのデプロイ方法については、以下のドキュメントを参照してください：
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - デプロイ手順の詳細
+### デプロイオプション
+
+#### オプション1: Google Cloud Run（推奨）
+
+- **[DEPLOY_NOW_CLOUDRUN.md](DEPLOY_NOW_CLOUDRUN.md)** - 今すぐデプロイ（ステップバイステップ）⭐
+- **[DEPLOYMENT_CLOUDRUN.md](DEPLOYMENT_CLOUDRUN.md)** - Cloud Run デプロイ手順の詳細
+
+**メリット**:
+- Google Cloud の信頼性とスケーラビリティ
+- 無料枠が充実（月2百万リクエスト）
+- 自動スケーリング
+- Docker ベースで環境の一貫性
+
+**クイックスタート**:
+```bash
+# gcloud CLI でデプロイ
+gcloud run deploy jikkennote-backend \
+    --image=asia-northeast1-docker.pkg.dev/PROJECT_ID/jikkennote-repo/backend:latest \
+    --region=asia-northeast1 \
+    --allow-unauthenticated
+```
+
+#### オプション2: Railway / Render
+
+- **[DEPLOY_NOW.md](DEPLOY_NOW.md)** - Railway版 今すぐデプロイ
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Railway/Render デプロイ手順の詳細
+
+**メリット**:
+- シンプルなデプロイフロー
+- GitHub 連携が簡単
+- ボリューム永続化が容易
+
+### 共通ドキュメント
+
 - **[USER_MANUAL.md](USER_MANUAL.md)** - エンドユーザー向けマニュアル
 - **[PRODUCTION_TEST_CHECKLIST.md](PRODUCTION_TEST_CHECKLIST.md)** - 本番環境テスト項目
 
-### クイックスタート
-
-1. **フロントエンド**: Vercelにデプロイ
-   ```bash
-   # Vercelにログイン
-   vercel login
-
-   # フロントエンドをデプロイ
-   cd frontend
-   vercel --prod
-   ```
-
-2. **バックエンド**: Railwayにデプロイ
-   - GitHubリポジトリを接続
-   - `backend` ディレクトリをルートに設定
-   - 環境変数を設定（CORS_ORIGINS等）
-   - デプロイ実行
-
-詳細は [DEPLOYMENT.md](DEPLOYMENT.md) を参照してください。
+詳細は各デプロイオプションのドキュメントを参照してください。
 
 ## 開発ステータス
 
@@ -505,13 +520,27 @@ TC001,テストケース1,合成実験,試薬A,加熱,ID3-15,2,4
 
 プロジェクトには以下のドキュメントが含まれています：
 
+### 主要ドキュメント
+
 1. **[README.md](README.md)** - プロジェクト概要、セットアップ、使い方
 2. **[CLAUDE.md](CLAUDE.md)** - 詳細な技術仕様書
-3. **[DEPLOYMENT.md](DEPLOYMENT.md)** - 本番環境へのデプロイ手順
-4. **[USER_MANUAL.md](USER_MANUAL.md)** - エンドユーザー向け完全マニュアル
-5. **[PRODUCTION_TEST_CHECKLIST.md](PRODUCTION_TEST_CHECKLIST.md)** - 本番環境テストチェックリスト
+3. **[USER_MANUAL.md](USER_MANUAL.md)** - エンドユーザー向け完全マニュアル
 
-フェーズ別サマリー:
+### デプロイドキュメント
+
+**Google Cloud Run版**:
+- **[DEPLOY_NOW_CLOUDRUN.md](DEPLOY_NOW_CLOUDRUN.md)** - 今すぐデプロイ（推奨）⭐
+- **[DEPLOYMENT_CLOUDRUN.md](DEPLOYMENT_CLOUDRUN.md)** - 詳細なデプロイ手順
+
+**Railway/Render版**:
+- **[DEPLOY_NOW.md](DEPLOY_NOW.md)** - 今すぐデプロイ
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - 詳細なデプロイ手順
+
+**共通**:
+- **[PRODUCTION_TEST_CHECKLIST.md](PRODUCTION_TEST_CHECKLIST.md)** - 本番環境テストチェックリスト
+
+### フェーズ別サマリー
+
 - **[PHASE2_SUMMARY.md](PHASE2_SUMMARY.md)** - Phase 2 実装サマリー
 - **[PHASE3_SUMMARY.md](PHASE3_SUMMARY.md)** - Phase 3 実装サマリー
 - **[PHASE4_SUMMARY.md](PHASE4_SUMMARY.md)** - Phase 4 実装サマリー
