@@ -310,8 +310,14 @@ async def search_experiments(request: SearchRequest):
         )
 
     except Exception as e:
-        print(f"Error in search: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"検索エラー: {str(e)}")
+        error_str = str(e)
+        print(f"Error in search: {error_str}")
+
+        # OpenAI APIキーエラーを検出
+        if "401" in error_str or "invalid_api_key" in error_str or "Incorrect API key" in error_str:
+            raise HTTPException(status_code=401, detail="OpenAI APIキーが無効です。設定ページで正しいAPIキー（sk-proj-で始まる）を入力してください。")
+
+        raise HTTPException(status_code=500, detail=f"検索エラー: {error_str}")
 
 
 @app.get("/prompts", response_model=PromptsResponse)

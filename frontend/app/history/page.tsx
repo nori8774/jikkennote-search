@@ -131,8 +131,17 @@ export default function HistoryPage() {
                         {history.results.slice(0, 10).map((result) => (
                           <button
                             key={result.noteId}
-                            onClick={() => handleViewNote(result.noteId)}
-                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200"
+                            onClick={(e) => {
+                              if (e.ctrlKey || e.metaKey) {
+                                // Ctrl/Cmdクリックで新しいタブで開く
+                                window.open(`/viewer?id=${result.noteId}`, '_blank');
+                              } else {
+                                // 通常クリックでモーダル表示
+                                handleViewNote(result.noteId);
+                              }
+                            }}
+                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200 cursor-pointer"
+                            title="クリック: モーダル表示 | Ctrl+クリック: 新しいタブで開く"
                           >
                             {result.noteId}
                           </button>

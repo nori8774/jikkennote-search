@@ -129,7 +129,12 @@ export const api = {
     });
 
     if (!response.ok) {
-      throw new Error(`Search failed: ${response.statusText}`);
+      if (response.status === 401) {
+        throw new Error('OpenAI APIキーが無効です。設定ページで正しいAPIキー（sk-proj-で始まる）を入力してください。');
+      }
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.detail || response.statusText;
+      throw new Error(`検索エラー: ${errorMessage}`);
     }
 
     return response.json();

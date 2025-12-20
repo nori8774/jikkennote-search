@@ -195,32 +195,51 @@ export default function SearchPage() {
                 {result.retrieved_docs && result.retrieved_docs.length > 0 && (
                   <div className="mt-8">
                     <h3 className="text-xl font-bold mb-4">検索された実験ノート（上位3件）</h3>
-                    {result.retrieved_docs.map((doc: string, index: number) => (
-                      <div key={index} className="border border-gray-300 rounded-lg p-4 mb-4">
-                        <div className="flex justify-between items-start mb-2">
-                          <h4 className="font-bold text-lg">ノート {index + 1}</h4>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleCopyMaterials(doc)}
-                              className="text-sm py-1 px-3"
-                            >
-                              材料をコピー
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleCopyMethods(doc)}
-                              className="text-sm py-1 px-3"
-                            >
-                              方法をコピー
-                            </Button>
+                    {result.retrieved_docs.map((doc: string, index: number) => {
+                      // ノートIDを抽出
+                      const idMatch = doc.match(/^#\s+(ID[\d-]+)/m);
+                      const noteId = idMatch ? idMatch[1] : null;
+
+                      return (
+                        <div key={index} className="border border-gray-300 rounded-lg p-4 mb-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-bold text-lg">ノート {index + 1}</h4>
+                              {noteId && (
+                                <a
+                                  href={`/viewer?id=${noteId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:text-blue-800 text-sm underline"
+                                  title="新しいタブで全文表示"
+                                >
+                                  {noteId} →
+                                </a>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleCopyMaterials(doc)}
+                                className="text-sm py-1 px-3"
+                              >
+                                材料をコピー
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleCopyMethods(doc)}
+                                className="text-sm py-1 px-3"
+                              >
+                                方法をコピー
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="prose max-w-none text-sm">
+                            <ReactMarkdown>{doc}</ReactMarkdown>
                           </div>
                         </div>
-                        <div className="prose max-w-none text-sm">
-                          <ReactMarkdown>{doc}</ReactMarkdown>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

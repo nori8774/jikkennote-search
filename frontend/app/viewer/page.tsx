@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
 import { api } from '@/lib/api';
 
-export default function ViewerPage() {
+function ViewerContent() {
+  const searchParams = useSearchParams();
   const [noteId, setNoteId] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,6 +18,37 @@ export default function ViewerPage() {
     methods?: string;
     results?: string;
   }>({});
+
+  // URLパラメータからIDを取得して自動表示
+  useEffect(() => {
+    const id = searchParams.get('id');
+    if (id) {
+      setNoteId(id);
+      handleLoadById(id);
+    }
+  }, [searchParams]);
+
+  const handleLoadById = async (id: string) => {
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await api.getNote(id);
+
+      if (!response.success || !response.note) {
+        setError(response.error || 'ノートの読み込みに失敗しました');
+        return;
+      }
+
+      setNoteContent(response.note.content);
+      setSections(response.note.sections);
+
+    } catch (err: any) {
+      setError(err.message || 'ノートの読み込みに失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLoad = async () => {
     setError('');
@@ -176,5 +209,13 @@ export default function ViewerPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ViewerPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center">読み込み中...</div>}>
+      <ViewerContent />
+    </Suspense>
   );
 }
