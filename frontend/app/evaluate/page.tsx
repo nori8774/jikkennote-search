@@ -44,6 +44,8 @@ export default function EvaluatePage() {
   const [testConditions, setTestConditions] = useState<TestCondition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [currentCondition, setCurrentCondition] = useState<number | null>(null);
 
   // 評価履歴（最新5件）
   const [evaluationHistories, setEvaluationHistories] = useState<EvaluationHistory[]>([]);
@@ -120,85 +122,113 @@ export default function EvaluatePage() {
   const handleEvaluateAll = async () => {
     setLoading(true);
     setError('');
+    setProgress({ current: 0, total: testConditions.length });
     const results: EvaluationResult[] = [];
+    const errors: string[] = [];
 
     try {
-      for (const condition of testConditions) {
-        console.log(`条件 ${condition.条件} を評価中...`);
+      // APIキーを取得（事前チェック）
+      const openaiKey = storage.getOpenAIApiKey();
+      const cohereKey = storage.getCohereApiKey();
 
-        // APIキーを取得
-        const openaiKey = storage.getOpenAIApiKey();
-        const cohereKey = storage.getCohereApiKey();
+      if (!openaiKey || !cohereKey) {
+        throw new Error('APIキーが設定されていません');
+      }
 
-        if (!openaiKey || !cohereKey) {
-          throw new Error('APIキーが設定されていません');
-        }
+      for (let i = 0; i < testConditions.length; i++) {
+        const condition = testConditions[i];
+        setCurrentCondition(condition.条件);
+        setProgress({ current: i + 1, total: testConditions.length });
 
-        // 検索実行（デフォルトの重点指示を使用）
-        const searchResponse = await api.search({
-          purpose: condition.目的 || '',
-          materials: condition.材料 || '',
-          methods: condition.実験手順 || '',
-          instruction: '', // デフォルトの重点指示（空文字列）
-          openai_api_key: openaiKey,
-          cohere_api_key: cohereKey,
-          embedding_model: embeddingModel,
-          llm_model: llmModel,
-          custom_prompts: customPrompts,
-        });
+        try {
+          console.log(`条件 ${condition.条件} を評価中...`);
 
-        // 検索結果からノートIDを抽出（リランキング後の上位10件）
-        const candidates: { noteId: string; rank: number }[] = [];
-        if (searchResponse.retrieved_docs && searchResponse.retrieved_docs.length > 0) {
-          for (let i = 0; i < Math.min(10, searchResponse.retrieved_docs.length); i++) {
-            const doc = searchResponse.retrieved_docs[i];
-            // ノートIDを抽出
-            const idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/) ||
-                           doc.match(/^#\s+(ID[\d-]+)/m) ||
-                           doc.match(/ID\d+-\d+/);
-            if (idMatch) {
-              candidates.push({
-                noteId: idMatch[1] || idMatch[0],
-                rank: i + 1,
+          // 検索実行（デフォルトの重点指示を使用）
+          const searchResponse = await api.search({
+            purpose: condition.目的 || '',
+            materials: condition.材料 || '',
+            methods: condition.実験手順 || '',
+            instruction: '', // デフォルトの重点指示（空文字列）
+            openai_api_key: openaiKey,
+            cohere_api_key: cohereKey,
+            embedding_model: embeddingModel,
+            llm_model: llmModel,
+            custom_prompts: customPrompts,
+          });
+
+          // 検索結果からノートIDを抽出（リランキング後の上位10件）
+          const candidates: { noteId: string; rank: number }[] = [];
+          if (searchResponse.retrieved_docs && searchResponse.retrieved_docs.length > 0) {
+            for (let j = 0; j < Math.min(10, searchResponse.retrieved_docs.length); j++) {
+              const doc = searchResponse.retrieved_docs[j];
+              // ノートIDを抽出
+              const idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/) ||
+                             doc.match(/^#\s+(ID[\d-]+)/m) ||
+                             doc.match(/ID\d+-\d+/);
+              if (idMatch) {
+                candidates.push({
+                  noteId: idMatch[1] || idMatch[0],
+                  rank: j + 1,
+                });
+              }
+            }
+          }
+
+          // 正解データを取得（ranking_1からranking_10まで）
+          const groundTruth: { noteId: string; rank: number }[] = [];
+          for (let j = 1; j <= 10; j++) {
+            const rankingKey = `ranking_${j}`;
+            if (condition[rankingKey]) {
+              groundTruth.push({
+                noteId: condition[rankingKey],
+                rank: j,
               });
             }
           }
+
+          // 評価指標を計算
+          const metrics = calculateMetrics(candidates, groundTruth);
+
+          results.push({
+            condition_id: condition.条件,
+            metrics,
+            candidates,
+            ground_truth: groundTruth,
+          });
+
+          console.log(`条件 ${condition.条件} 完了`);
+
+          // 少し待機してブラウザのリソースを解放
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+        } catch (conditionErr: any) {
+          console.error(`条件 ${condition.条件} でエラー:`, conditionErr);
+          errors.push(`条件${condition.条件}: ${conditionErr.message || 'エラーが発生しました'}`);
+          // エラーが発生しても次の条件に進む
         }
-
-        // 正解データを取得（ranking_1からranking_10まで）
-        const groundTruth: { noteId: string; rank: number }[] = [];
-        for (let i = 1; i <= 10; i++) {
-          const rankingKey = `ranking_${i}`;
-          if (condition[rankingKey]) {
-            groundTruth.push({
-              noteId: condition[rankingKey],
-              rank: i,
-            });
-          }
-        }
-
-        // 評価指標を計算
-        const metrics = calculateMetrics(candidates, groundTruth);
-
-        results.push({
-          condition_id: condition.条件,
-          metrics,
-          candidates,
-          ground_truth: groundTruth,
-        });
       }
 
-      // 平均スコアを計算
-      const avgMetrics = calculateAverageMetrics(results);
+      // 平均スコアを計算（成功した結果のみ）
+      if (results.length > 0) {
+        const avgMetrics = calculateAverageMetrics(results);
+        // 履歴に保存
+        saveEvaluationHistory(results, avgMetrics);
+      }
 
-      // 履歴に保存
-      saveEvaluationHistory(results, avgMetrics);
+      // エラーがあった場合は表示
+      if (errors.length > 0) {
+        setError(`一部の条件で評価に失敗しました:\n${errors.join('\n')}`);
+      } else if (results.length === 0) {
+        setError('全ての条件で評価に失敗しました');
+      }
 
     } catch (err: any) {
       console.error('評価エラー:', err);
       setError(err.message || '評価の実行に失敗しました');
     } finally {
       setLoading(false);
+      setCurrentCondition(null);
+      setProgress({ current: 0, total: 0 });
     }
   };
 
@@ -438,16 +468,27 @@ export default function EvaluatePage() {
               disabled={loading || testConditions.length === 0}
               className="w-full md:w-auto"
             >
-              {loading ? `評価実行中... (${testConditions.length}条件)` : '全条件を評価'}
+              {loading
+                ? currentCondition
+                  ? `条件 ${currentCondition} を評価中... (${progress.current}/${progress.total})`
+                  : `評価実行中... (${testConditions.length}条件)`
+                : '全条件を評価'}
             </Button>
-            <p className="text-sm text-gray-600 mt-2">
-              {testConditions.length}件の条件について検索・評価を実行します
-            </p>
+            {loading && (
+              <p className="text-sm text-blue-600 mt-2">
+                評価実行中です。ネットワークエラーが発生しても処理は継続されます...
+              </p>
+            )}
+            {!loading && (
+              <p className="text-sm text-gray-600 mt-2">
+                {testConditions.length}件の条件について検索・評価を実行します
+              </p>
+            )}
           </div>
 
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
-              {error}
+              <div className="whitespace-pre-wrap">{error}</div>
             </div>
           )}
         </div>
