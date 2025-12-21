@@ -143,7 +143,7 @@ export default function EvaluatePage() {
         try {
           console.log(`条件 ${condition.条件} を評価中...`);
 
-          // 検索実行（デフォルトの重点指示を使用）
+          // 検索実行（評価モード: 比較省略、Top10返却）
           const searchResponse = await api.search({
             purpose: condition.目的 || '',
             materials: condition.材料 || '',
@@ -154,6 +154,7 @@ export default function EvaluatePage() {
             embedding_model: embeddingModel,
             llm_model: llmModel,
             custom_prompts: customPrompts,
+            evaluation_mode: true,  // 評価モードを有効化
           });
 
           // 検索結果からノートIDを抽出（リランキング後の上位10件）
@@ -161,15 +162,21 @@ export default function EvaluatePage() {
           if (searchResponse.retrieved_docs && searchResponse.retrieved_docs.length > 0) {
             for (let j = 0; j < Math.min(10, searchResponse.retrieved_docs.length); j++) {
               const doc = searchResponse.retrieved_docs[j];
-              // ノートIDを抽出
-              const idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/) ||
-                             doc.match(/^#\s+(ID[\d-]+)/m) ||
-                             doc.match(/ID\d+-\d+/);
+              // ノートIDを抽出（複数パターンを試行）
+              const idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/) ||  // 【実験ノートID: ID3-14】
+                             doc.match(/実験ノートID:\s*(ID[\d-]+)/) ||       // 実験ノートID: ID3-14
+                             doc.match(/^#\s+(ID[\d-]+)/m) ||                  // # ID3-14
+                             doc.match(/(ID\d+-\d+)/);                         // ID3-14
+
               if (idMatch) {
+                // マッチしたグループから正しいIDを取得
+                const noteId = idMatch[1] || idMatch[0];
                 candidates.push({
-                  noteId: idMatch[1] || idMatch[0],
+                  noteId: noteId,
                   rank: j + 1,
                 });
+              } else {
+                console.warn(`条件 ${condition.条件}: ノートID抽出失敗（順位 ${j+1}）`, doc.substring(0, 100));
               }
             }
           }

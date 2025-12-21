@@ -16,6 +16,7 @@ export interface SearchRequest {
   embedding_model?: string;
   llm_model?: string;
   custom_prompts?: Record<string, string>;
+  evaluation_mode?: boolean;  // 評価モード（True: 比較省略、Top10返却）
 }
 
 export interface SearchResponse {

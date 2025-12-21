@@ -73,6 +73,7 @@ class SearchRequest(BaseModel):
     embedding_model: Optional[str] = None
     llm_model: Optional[str] = None
     custom_prompts: Optional[Dict[str, str]] = None
+    evaluation_mode: bool = False  # 評価モード（True: 比較省略、Top10返却）
 
 
 class SearchResponse(BaseModel):
@@ -290,7 +291,7 @@ async def search_experiments(request: SearchRequest):
             "instruction": request.instruction
         }
 
-        result = agent.run(input_data)
+        result = agent.run(input_data, evaluation_mode=request.evaluation_mode)
 
         # 結果から最後のメッセージを取得
         final_message = ""

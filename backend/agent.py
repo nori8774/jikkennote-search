@@ -36,9 +36,10 @@ class AgentState(TypedDict):
     search_query: str
 
     # 検索結果
-    retrieved_docs: List[str]  # UI表示用の最終選抜（Top 3）
+    retrieved_docs: List[str]  # UI表示用の最終選抜（通常: Top 3、評価モード: Top 10）
 
     iteration: int
+    evaluation_mode: bool  # 評価モードフラグ（True: 比較省略、Top10返却）
 
 
 class SearchAgent:
@@ -216,7 +217,13 @@ class SearchAgent:
     def _search_node(self, state: AgentState):
         """検索 & Cohereリランキングノード"""
         start_time = time.time()
-        print("--- 🔍 [3/4] 検索 & Cohereリランキング実行 ---")
+        evaluation_mode = state.get("evaluation_mode", False)
+
+        if evaluation_mode:
+            print("--- 🔍 [3/3] 検索 & Cohereリランキング実行（評価モード）---")
+        else:
+            print("--- 🔍 [3/4] 検索 & Cohereリランキング実行 ---")
+
         query = state["search_query"]
 
         try:
@@ -245,6 +252,9 @@ class SearchAgent:
 
             docs_for_ui = []
 
+            # 評価モードなら全件（Top10）、通常モードなら上位3件のみ
+            display_limit = config.RERANK_TOP_N if evaluation_mode else config.UI_DISPLAY_TOP_N
+
             for i, result in enumerate(rerank_results.results):
                 original_doc = candidates[result.index]
                 source_id = original_doc.metadata.get('source', 'unknown')
@@ -253,12 +263,15 @@ class SearchAgent:
 
                 print(f"  Rank {i+1:2d} | Score: {score:.4f} | ID: {source_id} | {snippet}...")
 
-                # UI用には上位3件のみ保存
-                if i < config.UI_DISPLAY_TOP_N:
+                # 評価モードなら全件、通常モードなら上位3件のみ保存
+                if i < display_limit:
                     docs_for_ui.append(f"【実験ノートID: {source_id}】\n{original_doc.page_content}")
 
             print(f"  --------------------------------------------------")
-            print(f"  > UI向けに上位 {len(docs_for_ui)} 件を選択しました。")
+            if evaluation_mode:
+                print(f"  > 評価モード: 上位 {len(docs_for_ui)} 件を返却します。")
+            else:
+                print(f"  > UI向けに上位 {len(docs_for_ui)} 件を選択しました。")
 
         except Exception as e:
             print(f"  > ⚠️ Search/Rerank Error: {e}")
@@ -305,6 +318,14 @@ class SearchAgent:
         print(f"  ⏱️ Execution Time: {elapsed_time:.4f} sec")
         return {"messages": [response]}
 
+    def _should_compare(self, state: AgentState):
+        """compareノードに進むべきかを判定"""
+        evaluation_mode = state.get("evaluation_mode", False)
+        if evaluation_mode:
+            return END
+        else:
+            return "compare"
+
     def _build_graph(self):
         """グラフを構築"""
         workflow = StateGraph(AgentState)
@@ -317,13 +338,27 @@ class SearchAgent:
         workflow.set_entry_point("normalize")
         workflow.add_edge("normalize", "generate_query")
         workflow.add_edge("generate_query", "search")
-        workflow.add_edge("search", "compare")
+
+        # 評価モードならcompareをスキップ
+        workflow.add_conditional_edges(
+            "search",
+            self._should_compare,
+            {
+                "compare": "compare",
+                END: END
+            }
+        )
         workflow.add_edge("compare", END)
 
         return workflow.compile()
 
-    def run(self, input_data: dict):
-        """エージェントを実行"""
+    def run(self, input_data: dict, evaluation_mode: bool = False):
+        """エージェントを実行
+
+        Args:
+            input_data: 検索条件（purpose, materials, methods等）
+            evaluation_mode: 評価モード（True: 比較省略、Top10返却、False: 通常動作）
+        """
         initial_state = {
             "messages": [HumanMessage(content=json.dumps(input_data, ensure_ascii=False))],
             "input_purpose": "",
@@ -333,7 +368,8 @@ class SearchAgent:
             "user_focus_instruction": "",
             "search_query": "",
             "retrieved_docs": [],
-            "iteration": 0
+            "iteration": 0,
+            "evaluation_mode": evaluation_mode
         }
 
         result = self.graph.invoke(initial_state)
