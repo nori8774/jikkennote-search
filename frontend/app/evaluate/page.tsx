@@ -186,8 +186,11 @@ export default function EvaluatePage() {
           for (let j = 1; j <= 10; j++) {
             const rankingKey = `ranking_${j}`;
             if (condition[rankingKey]) {
+              // ノートIDにIDプレフィックスを追加（評価データは "1-2" 形式、検索結果は "ID1-2" 形式）
+              const rawId = condition[rankingKey];
+              const noteId = rawId.startsWith('ID') ? rawId : `ID${rawId}`;
               groundTruth.push({
-                noteId: condition[rankingKey],
+                noteId: noteId,
                 rank: j,
               });
             }
