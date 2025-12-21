@@ -213,7 +213,7 @@ export default function SettingsPage() {
 
               {Object.entries(defaultPrompts).map(([key, value]: [string, any]) => (
                 <div key={key} className="border border-gray-300 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-2">
+                  <div className="flex justify-between items-start mb-4">
                     <div>
                       <h3 className="font-bold">{value.name}</h3>
                       <p className="text-sm text-gray-600">{value.description}</p>
@@ -227,18 +227,48 @@ export default function SettingsPage() {
                     </Button>
                   </div>
 
-                  <textarea
-                    className="w-full border border-gray-300 rounded-md p-3 h-64 font-mono text-sm mt-2"
-                    value={customPrompts[key] || value.prompt}
-                    onChange={(e) => setCustomPrompts({ ...customPrompts, [key]: e.target.value })}
-                    placeholder={value.prompt}
-                  />
+                  {/* 左右2カラムレイアウト */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* 左側: デフォルトプロンプト（読み取り専用） */}
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-gray-700">
+                          デフォルトプロンプト
+                        </label>
+                        <button
+                          onClick={() => {
+                            setCustomPrompts({ ...customPrompts, [key]: value.prompt });
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          右にコピー →
+                        </button>
+                      </div>
+                      <textarea
+                        className="w-full border border-gray-200 bg-gray-50 rounded-md p-3 h-64 font-mono text-sm"
+                        value={value.prompt}
+                        readOnly
+                      />
+                    </div>
 
-                  {customPrompts[key] && customPrompts[key] !== value.prompt && (
-                    <p className="text-sm text-warning mt-2">
-                      ⚠️ カスタマイズされています
-                    </p>
-                  )}
+                    {/* 右側: カスタムプロンプト（編集可能） */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        カスタムプロンプト
+                        {customPrompts[key] && customPrompts[key] !== value.prompt && (
+                          <span className="ml-2 text-xs text-warning">
+                            ⚠️ カスタマイズ済み
+                          </span>
+                        )}
+                      </label>
+                      <textarea
+                        className="w-full border border-gray-300 rounded-md p-3 h-64 font-mono text-sm"
+                        value={customPrompts[key] || value.prompt}
+                        onChange={(e) => setCustomPrompts({ ...customPrompts, [key]: e.target.value })}
+                        placeholder={value.prompt}
+                      />
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
