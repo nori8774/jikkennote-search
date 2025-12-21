@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import Button from '@/components/Button';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
+import * as XLSX from 'xlsx';
 
 interface TestCondition {
   条件: number;
   目的: string;
   材料: string;
   実験手順: string;
+  重点指示?: string;  // 新規: 重点指示フィールド
   [key: string]: any; // ranking_1, ranking_2, etc.
 }
 
@@ -81,6 +83,48 @@ export default function EvaluatePage() {
     }
   };
 
+  // Excel ファイルを読み込む
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        // データを TestCondition 形式に変換
+        const conditions: TestCondition[] = jsonData.map((row: any) => {
+          // ranking カラムのノートIDに "ID" プレフィックスを追加（必要な場合）
+          const processedRow = { ...row };
+          for (let i = 1; i <= 16; i++) {
+            const key = `ranking_${i}`;
+            if (processedRow[key] && typeof processedRow[key] === 'string') {
+              // "ID" プレフィックスがない場合は追加
+              if (!processedRow[key].startsWith('ID')) {
+                processedRow[key] = `ID${processedRow[key]}`;
+              }
+            }
+          }
+          return processedRow as TestCondition;
+        });
+
+        setTestConditions(conditions);
+        setError('');
+        console.log(`Excel ファイルから ${conditions.length} 件の評価条件を読み込みました`);
+      } catch (err) {
+        console.error('Excel ファイルの解析に失敗:', err);
+        setError('Excel ファイルの解析に失敗しました');
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
   const loadDefaultPrompts = async () => {
     try {
       const response = await api.getDefaultPrompts();
@@ -148,7 +192,7 @@ export default function EvaluatePage() {
             purpose: condition.目的 || '',
             materials: condition.材料 || '',
             methods: condition.実験手順 || '',
-            instruction: '', // デフォルトの重点指示（空文字列）
+            instruction: condition.重点指示 || '', // 重点指示フィールドを使用
             openai_api_key: openaiKey,
             cohere_api_key: cohereKey,
             embedding_model: embeddingModel,
@@ -157,20 +201,26 @@ export default function EvaluatePage() {
             evaluation_mode: true,  // 評価モードを有効化
           });
 
+          // デバッグログ: 検索レスポンスを確認
+          console.log(`条件 ${condition.条件} の検索レスポンス:`, {
+            success: searchResponse.success,
+            retrieved_docs_count: searchResponse.retrieved_docs?.length || 0,
+            first_doc_preview: searchResponse.retrieved_docs?.[0]?.substring(0, 200) || 'なし'
+          });
+
           // 検索結果からノートIDを抽出（リランキング後の上位10件）
           const candidates: { noteId: string; rank: number }[] = [];
           if (searchResponse.retrieved_docs && searchResponse.retrieved_docs.length > 0) {
             for (let j = 0; j < Math.min(10, searchResponse.retrieved_docs.length); j++) {
               const doc = searchResponse.retrieved_docs[j];
-              // ノートIDを抽出（複数パターンを試行）
-              const idMatch = doc.match(/【実験ノートID:\s*(ID[\d-]+)】/) ||  // 【実験ノートID: ID3-14】
-                             doc.match(/実験ノートID:\s*(ID[\d-]+)/) ||       // 実験ノートID: ID3-14
-                             doc.match(/^#\s+(ID[\d-]+)/m) ||                  // # ID3-14
-                             doc.match(/(ID\d+-\d+)/);                         // ID3-14
+              // ノートIDを抽出（バックエンドから返されるフォーマット: 【実験ノートID: ID3-14】）
+              const idMatch = doc.match(/【実験ノートID:\s*([ID\d-]+)】/) ||  // 【実験ノートID: ID3-14】
+                             doc.match(/実験ノートID:\s*([ID\d-]+)/) ||       // 実験ノートID: ID3-14
+                             doc.match(/^#\s+([ID\d-]+)/m) ||                  // # ID3-14
+                             doc.match(/\b(ID\d+-\d+)\b/);                     // ID3-14
 
               if (idMatch) {
-                // マッチしたグループから正しいIDを取得
-                const noteId = idMatch[1] || idMatch[0];
+                const noteId = idMatch[1];
                 candidates.push({
                   noteId: noteId,
                   rank: j + 1,
@@ -186,9 +236,8 @@ export default function EvaluatePage() {
           for (let j = 1; j <= 10; j++) {
             const rankingKey = `ranking_${j}`;
             if (condition[rankingKey]) {
-              // ノートIDにIDプレフィックスを追加（評価データは "1-2" 形式、検索結果は "ID1-2" 形式）
-              const rawId = condition[rankingKey];
-              const noteId = rawId.startsWith('ID') ? rawId : `ID${rawId}`;
+              // ノートIDをそのまま使用（形式を統一）
+              const noteId = condition[rankingKey];
               groundTruth.push({
                 noteId: noteId,
                 rank: j,
@@ -351,6 +400,40 @@ export default function EvaluatePage() {
         {/* 評価条件セクション */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
           <h2 className="text-xl font-bold mb-4">評価条件</h2>
+
+          {/* Excel ファイルアップロードセクション */}
+          <div className="border border-gray-300 rounded-md p-4 mb-6 bg-gray-50">
+            <h3 className="font-semibold mb-2">評価データファイル</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Excel ファイル（.xlsx）をアップロードして評価データを読み込みます。
+              <br />
+              現在の評価条件数: {testConditions.length} 件
+            </p>
+            <div className="flex items-center gap-4">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleFileUpload}
+                className="block w-full text-sm text-gray-500
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-md file:border-0
+                  file:text-sm file:font-semibold
+                  file:bg-primary file:text-white
+                  hover:file:bg-primary-dark
+                  cursor-pointer"
+              />
+              <Button
+                variant="secondary"
+                onClick={loadEvaluationData}
+                className="text-sm whitespace-nowrap"
+              >
+                JSONデータ読込
+              </Button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              ※ Excel ファイルには「条件」「目的」「材料」「実験手順」「重点指示」「ranking_1〜16」のカラムが必要です
+            </p>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
