@@ -4,6 +4,14 @@ import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
+import {
+  getSavedPrompts,
+  savePrompt,
+  deletePrompt,
+  getRemainingSlots,
+  getPromptById
+} from '@/lib/promptStorage';
+import { SavedPrompt } from '@/lib/types';
 
 export default function SettingsPage() {
   const [openaiKey, setOpenaiKey] = useState('');
@@ -15,6 +23,13 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<'api' | 'models' | 'prompts'>('api');
   const [saved, setSaved] = useState(false);
 
+  // プロンプト保存機能用のステート
+  const [savedPromptsList, setSavedPromptsList] = useState<SavedPrompt[]>([]);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [savePromptName, setSavePromptName] = useState('');
+  const [savePromptDescription, setSavePromptDescription] = useState('');
+  const [saveError, setSaveError] = useState('');
+
   useEffect(() => {
     // localStorageから設定を読み込む
     setOpenaiKey(storage.getOpenAIApiKey() || '');
@@ -22,6 +37,9 @@ export default function SettingsPage() {
     setEmbeddingModel(storage.getEmbeddingModel() || 'text-embedding-3-small');
     setLlmModel(storage.getLLMModel() || 'gpt-4o-mini');
     setCustomPrompts(storage.getCustomPrompts() || {});
+
+    // 保存済みプロンプト一覧を読み込む
+    setSavedPromptsList(getSavedPrompts());
 
     // デフォルトプロンプトを取得
     api.getDefaultPrompts().then((res) => {
@@ -51,6 +69,67 @@ export default function SettingsPage() {
   const handleResetAllPrompts = () => {
     if (confirm('全てのプロンプトを初期設定に戻しますか？')) {
       setCustomPrompts({});
+    }
+  };
+
+  // プロンプト保存機能
+  const handleOpenSaveDialog = () => {
+    setSavePromptName('');
+    setSavePromptDescription('');
+    setSaveError('');
+    setShowSaveDialog(true);
+  };
+
+  const handleSavePromptSet = () => {
+    if (!savePromptName.trim()) {
+      setSaveError('プロンプト名を入力してください。');
+      return;
+    }
+
+    // 現在のプロンプトを保存
+    const promptsToSave = {
+      query_generation: customPrompts['query_generation'] || defaultPrompts?.query_generation?.prompt || '',
+      compare: customPrompts['compare'] || defaultPrompts?.compare?.prompt || ''
+    };
+
+    const result = savePrompt(savePromptName, promptsToSave, savePromptDescription);
+
+    if (!result.success) {
+      setSaveError(result.error || '保存に失敗しました。');
+      return;
+    }
+
+    // 保存成功
+    setSavedPromptsList(getSavedPrompts());
+    setShowSaveDialog(false);
+    alert(`プロンプト「${savePromptName}」を保存しました。`);
+  };
+
+  const handleRestorePrompt = (id: string) => {
+    const prompt = getPromptById(id);
+    if (!prompt) {
+      alert('プロンプトが見つかりません。');
+      return;
+    }
+
+    if (confirm(`プロンプト「${prompt.name}」を復元しますか？現在の編集内容は上書きされます。`)) {
+      setCustomPrompts({
+        query_generation: prompt.prompts.query_generation,
+        compare: prompt.prompts.compare
+      });
+      alert(`プロンプト「${prompt.name}」を復元しました。「設定を保存」ボタンをクリックして適用してください。`);
+    }
+  };
+
+  const handleDeleteSavedPrompt = (id: string, name: string) => {
+    if (confirm(`プロンプト「${name}」を削除しますか？この操作は元に戻せません。`)) {
+      const result = deletePrompt(id);
+      if (result.success) {
+        setSavedPromptsList(getSavedPrompts());
+        alert('削除しました。');
+      } else {
+        alert(result.error || '削除に失敗しました。');
+      }
     }
   };
 
@@ -206,10 +285,61 @@ export default function SettingsPage() {
             <div className="space-y-8">
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-bold">プロンプトのカスタマイズ</h2>
-                <Button variant="danger" onClick={handleResetAllPrompts}>
-                  全て初期設定にリセット
-                </Button>
+                <div className="flex gap-3">
+                  <Button onClick={handleOpenSaveDialog}>
+                    現在のプロンプトを保存
+                  </Button>
+                  <Button variant="danger" onClick={handleResetAllPrompts}>
+                    全て初期設定にリセット
+                  </Button>
+                </div>
               </div>
+
+              {/* 保存済みプロンプト一覧 */}
+              {savedPromptsList.length > 0 && (
+                <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
+                  <h3 className="font-bold mb-3">
+                    保存済みプロンプト ({savedPromptsList.length}/50)
+                  </h3>
+                  <div className="space-y-2">
+                    {savedPromptsList.map((prompt) => (
+                      <div
+                        key={prompt.id}
+                        className="bg-white border border-gray-200 rounded p-3 flex justify-between items-start"
+                      >
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-sm">{prompt.name}</h4>
+                          {prompt.description && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              {prompt.description}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-500 mt-1">
+                            更新日: {new Date(prompt.updatedAt).toLocaleString('ja-JP')}
+                          </p>
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          <button
+                            onClick={() => handleRestorePrompt(prompt.id)}
+                            className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 border border-blue-600 rounded"
+                          >
+                            復元
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSavedPrompt(prompt.id, prompt.name)}
+                            className="text-xs text-red-600 hover:text-red-800 px-2 py-1 border border-red-600 rounded"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-3">
+                    残り保存可能数: {getRemainingSlots()}個
+                  </p>
+                </div>
+              )}
 
               {Object.entries(defaultPrompts).map(([key, value]: [string, any]) => (
                 <div key={key} className="border border-gray-300 rounded-lg p-4">
@@ -284,6 +414,70 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
+
+        {/* プロンプト保存ダイアログ */}
+        {showSaveDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+              <h3 className="text-xl font-bold mb-4">プロンプトを保存</h3>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    プロンプト名 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full border border-gray-300 rounded-md p-2"
+                    value={savePromptName}
+                    onChange={(e) => {
+                      setSavePromptName(e.target.value);
+                      setSaveError('');
+                    }}
+                    placeholder="例: 高精度検索用プロンプト"
+                    maxLength={50}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    説明（任意）
+                  </label>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-md p-2"
+                    value={savePromptDescription}
+                    onChange={(e) => setSavePromptDescription(e.target.value)}
+                    placeholder="このプロンプトの特徴や用途を記載"
+                    rows={3}
+                    maxLength={200}
+                  />
+                </div>
+
+                {saveError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                    {saveError}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    onClick={handleSavePromptSet}
+                    className="flex-1"
+                  >
+                    保存
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowSaveDialog(false)}
+                    className="flex-1"
+                  >
+                    キャンセル
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import Button from '@/components/Button';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import * as XLSX from 'xlsx';
+import { getSavedPrompts } from '@/lib/promptStorage';
 
 interface TestCondition {
   条件: number;
@@ -17,19 +18,26 @@ interface TestCondition {
 
 interface EvaluationResult {
   condition_id: number;
+  condition_details: {
+    目的: string;
+    材料: string;
+    実験手順: string;
+    重点指示?: string;
+  };
   metrics: {
     ndcg_10: number;
     precision_10: number;
     recall_10: number;
     mrr: number;
   };
-  candidates: { noteId: string; rank: number }[]; // 検索結果 (10件)
+  candidates: { noteId: string; rank: number; score: number }[]; // 検索結果（リランキング後）
   ground_truth: { noteId: string; rank: number }[]; // 正解データ (10件)
 }
 
 interface EvaluationHistory {
   id: string;
   timestamp: Date;
+  promptName?: string;  // プロンプト名
   embedding_model: string;
   llm_model: string;
   custom_prompts: Record<string, string>;
@@ -60,6 +68,10 @@ export default function EvaluatePage() {
   const [customPrompts, setCustomPrompts] = useState<Record<string, string>>({});
   const [showPromptEditor, setShowPromptEditor] = useState(false);
 
+  // プロンプト名管理
+  const [promptName, setPromptName] = useState('デフォルト');
+  const [savedPromptsList, setSavedPromptsList] = useState<any[]>([]);
+
   // 評価用シートのデータを読み込む
   useEffect(() => {
     loadEvaluationData();
@@ -70,6 +82,9 @@ export default function EvaluatePage() {
     setEmbeddingModel(storage.getEmbeddingModel() || 'text-embedding-3-small');
     setLlmModel(storage.getLLMModel() || 'gpt-4o-mini');
     setCustomPrompts(storage.getCustomPrompts() || {});
+
+    // 保存済みプロンプト一覧を読み込む
+    setSavedPromptsList(getSavedPrompts());
   }, []);
 
   const loadEvaluationData = async () => {
@@ -137,19 +152,40 @@ export default function EvaluatePage() {
   const loadEvaluationHistories = () => {
     const stored = localStorage.getItem('evaluation_histories');
     if (stored) {
-      const parsed = JSON.parse(stored);
-      const histories = parsed.map((h: any) => ({
-        ...h,
-        timestamp: new Date(h.timestamp),
-      }));
-      setEvaluationHistories(histories);
+      try {
+        const parsed = JSON.parse(stored);
+        console.log('📊 評価履歴を読み込みました:', parsed.length, '件');
+        const histories = parsed.map((h: any) => {
+          console.log('履歴データ:', {
+            id: h.id,
+            timestamp: h.timestamp,
+            hasResults: !!h.results,
+            resultsCount: h.results?.length || 0,
+            firstResult: h.results?.[0] || null
+          });
+          return {
+            ...h,
+            timestamp: new Date(h.timestamp),
+          };
+        });
+        setEvaluationHistories(histories);
+      } catch (error) {
+        console.error('評価履歴の読み込みに失敗:', error);
+      }
+    } else {
+      console.log('📊 評価履歴が見つかりません（localStorage）');
     }
   };
 
   const saveEvaluationHistory = (results: EvaluationResult[], avgMetrics: any) => {
+    console.log('💾 評価履歴を保存します');
+    console.log('結果数:', results.length);
+    console.log('最初の結果:', results[0]);
+
     const newHistory: EvaluationHistory = {
       id: Date.now().toString(),
       timestamp: new Date(),
+      promptName: promptName || 'デフォルト',  // プロンプト名を記録
       embedding_model: embeddingModel,
       llm_model: llmModel,
       custom_prompts: customPrompts,
@@ -157,9 +193,13 @@ export default function EvaluatePage() {
       average_metrics: avgMetrics,
     };
 
+    console.log('保存する履歴データ:', newHistory);
+
     const updated = [newHistory, ...evaluationHistories].slice(0, 5); // 最新5件のみ保持
     setEvaluationHistories(updated);
     localStorage.setItem('evaluation_histories', JSON.stringify(updated));
+
+    console.log('✅ 評価履歴を保存しました（全', updated.length, '件）');
   };
 
   // 全条件について評価を実行
@@ -208,8 +248,8 @@ export default function EvaluatePage() {
             first_doc_preview: searchResponse.retrieved_docs?.[0]?.substring(0, 200) || 'なし'
           });
 
-          // 検索結果からノートIDを抽出（リランキング後の上位10件）
-          const candidates: { noteId: string; rank: number }[] = [];
+          // 検索結果からノートIDとスコアを抽出（リランキング後の上位10件）
+          const candidates: { noteId: string; rank: number; score: number }[] = [];
           if (searchResponse.retrieved_docs && searchResponse.retrieved_docs.length > 0) {
             for (let j = 0; j < Math.min(10, searchResponse.retrieved_docs.length); j++) {
               const doc = searchResponse.retrieved_docs[j];
@@ -221,9 +261,13 @@ export default function EvaluatePage() {
 
               if (idMatch) {
                 const noteId = idMatch[1];
+                // スコアは現時点では取得できないため、ランクベースの仮スコアを設定
+                // (将来的にバックエンドからスコアが返される場合は、それを使用)
+                const score = 1.0 - (j * 0.05); // 1位=1.0, 2位=0.95, ...
                 candidates.push({
                   noteId: noteId,
                   rank: j + 1,
+                  score: score,
                 });
               } else {
                 console.warn(`条件 ${condition.条件}: ノートID抽出失敗（順位 ${j+1}）`, doc.substring(0, 100));
@@ -250,6 +294,12 @@ export default function EvaluatePage() {
 
           results.push({
             condition_id: condition.条件,
+            condition_details: {
+              目的: condition.目的 || '',
+              材料: condition.材料 || '',
+              実験手順: condition.実験手順 || '',
+              重点指示: condition.重点指示 || '',
+            },
             metrics,
             candidates,
             ground_truth: groundTruth,
@@ -293,7 +343,7 @@ export default function EvaluatePage() {
 
   // 評価指標の計算
   const calculateMetrics = (
-    candidates: { noteId: string; rank: number }[],
+    candidates: { noteId: string; rank: number; score?: number }[],
     groundTruth: { noteId: string; rank: number }[]
   ) => {
     const k = 10;
@@ -554,6 +604,39 @@ export default function EvaluatePage() {
             )}
           </div>
 
+          {/* プロンプト名の設定 */}
+          <div className="bg-gray-50 border border-gray-300 rounded-lg p-4 mt-6">
+            <h3 className="font-bold mb-3">プロンプト名</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              評価履歴に記録するプロンプト名を選択または入力してください。
+            </p>
+
+            <div className="flex gap-3 items-center">
+              <select
+                className="flex-1 border border-gray-300 rounded-md p-2"
+                value={promptName}
+                onChange={(e) => setPromptName(e.target.value)}
+              >
+                <option value="デフォルト">デフォルト</option>
+                <option value="カスタム">カスタム（手動入力）</option>
+                {savedPromptsList.map((prompt) => (
+                  <option key={prompt.id} value={prompt.name}>
+                    {prompt.name}
+                  </option>
+                ))}
+              </select>
+
+              {promptName === 'カスタム' && (
+                <input
+                  type="text"
+                  className="flex-1 border border-gray-300 rounded-md p-2"
+                  placeholder="プロンプト名を入力"
+                  onChange={(e) => setPromptName(e.target.value || 'カスタム')}
+                />
+              )}
+            </div>
+          </div>
+
           {/* 評価実行ボタン */}
           <div className="mt-6">
             <Button
@@ -587,9 +670,49 @@ export default function EvaluatePage() {
         </div>
 
         {/* 評価履歴セクション */}
-        {evaluationHistories.length > 0 && (
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <h2 className="text-xl font-bold mb-4">評価履歴（最新5件）</h2>
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold">評価履歴（最新5件）</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const data = localStorage.getItem('evaluation_histories');
+                  console.log('📊 LocalStorage評価履歴:', data);
+                  if (data) {
+                    const parsed = JSON.parse(data);
+                    console.log('パース後:', parsed);
+                    alert(`評価履歴: ${parsed.length}件\n\n詳細はコンソールを確認してください`);
+                  } else {
+                    alert('評価履歴がありません');
+                  }
+                }}
+                className="text-xs px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+              >
+                🔍 データ確認
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('評価履歴を全て削除しますか？')) {
+                    localStorage.removeItem('evaluation_histories');
+                    setEvaluationHistories([]);
+                    alert('評価履歴を削除しました');
+                  }
+                }}
+                className="text-xs px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200"
+              >
+                🗑️ 履歴削除
+              </button>
+            </div>
+          </div>
+
+          {evaluationHistories.length === 0 ? (
+            <div className="p-6 bg-gray-50 border border-gray-300 rounded text-center">
+              <p className="text-gray-600 mb-2">評価履歴がありません</p>
+              <p className="text-sm text-gray-500">
+                「全条件を評価」ボタンをクリックして評価を実行すると、ここに履歴が表示されます。
+              </p>
+            </div>
+          ) : (
 
             <div className="space-y-4">
               {evaluationHistories.map((history) => (
@@ -597,9 +720,11 @@ export default function EvaluatePage() {
                   {/* ヘッダー部分 */}
                   <div
                     className="p-4 cursor-pointer hover:bg-gray-50"
-                    onClick={() =>
-                      setExpandedHistoryId(expandedHistoryId === history.id ? null : history.id)
-                    }
+                    onClick={() => {
+                      console.log('クリック:', history.id, '現在の展開ID:', expandedHistoryId);
+                      console.log('履歴データ:', history);
+                      setExpandedHistoryId(expandedHistoryId === history.id ? null : history.id);
+                    }}
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
@@ -607,6 +732,11 @@ export default function EvaluatePage() {
                           <span className="text-sm font-medium">
                             {history.timestamp.toLocaleString('ja-JP')}
                           </span>
+                          {history.promptName && (
+                            <span className="text-xs px-2 py-1 bg-purple-100 text-purple-800 rounded font-semibold">
+                              📌 {history.promptName}
+                            </span>
+                          )}
                           <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded">
                             {history.embedding_model}
                           </span>
@@ -658,13 +788,67 @@ export default function EvaluatePage() {
                   {/* 展開部分 */}
                   {expandedHistoryId === history.id && (
                     <div className="border-t border-gray-200 p-4 bg-gray-50">
+                      {/* デバッグ情報 */}
+                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
+                        <p className="font-bold mb-1">デバッグ情報:</p>
+                        <p>履歴ID: {history.id}</p>
+                        <p>results配列: {history.results ? `${history.results.length}件` : '存在しない'}</p>
+                        <p>promptName: {history.promptName || '未設定'}</p>
+                        {history.results && history.results.length > 0 && (
+                          <p>最初の結果のcondition_id: {history.results[0].condition_id}</p>
+                        )}
+                      </div>
+
                       <div className="space-y-4">
-                        {history.results.map((result) => (
-                          <div
-                            key={result.condition_id}
-                            className="border border-gray-200 rounded-lg p-4 bg-white"
-                          >
-                            <h4 className="font-bold text-sm mb-3">条件 {result.condition_id}</h4>
+                        {history.results && history.results.length > 0 ? (
+                          history.results.map((result) => (
+                            <div
+                              key={result.condition_id}
+                              className="border border-gray-200 rounded-lg p-4 bg-white"
+                            >
+                              <h4 className="font-bold text-sm mb-3">条件 {result.condition_id}</h4>
+
+                              {/* 条件の詳細情報 */}
+                              {result.condition_details && (
+                                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                                  <h5 className="font-semibold text-xs mb-2 text-blue-900">入力条件</h5>
+                                  <div className="space-y-2 text-xs">
+                                    {result.condition_details.目的 && (
+                                      <div>
+                                        <span className="font-semibold text-gray-700">目的: </span>
+                                        <span className="text-gray-600">{result.condition_details.目的}</span>
+                                      </div>
+                                    )}
+                                    {result.condition_details.材料 && (
+                                      <div>
+                                        <span className="font-semibold text-gray-700">材料: </span>
+                                        <span className="text-gray-600 whitespace-pre-wrap">{result.condition_details.材料}</span>
+                                      </div>
+                                    )}
+                                    {result.condition_details.実験手順 && (
+                                      <div>
+                                        <span className="font-semibold text-gray-700">実験手順: </span>
+                                        <span className="text-gray-600 whitespace-pre-wrap">{result.condition_details.実験手順}</span>
+                                      </div>
+                                    )}
+                                    {result.condition_details.重点指示 && (
+                                      <div>
+                                        <span className="font-semibold text-gray-700">重点指示: </span>
+                                        <span className="text-gray-600">{result.condition_details.重点指示}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 古いデータの場合の警告 */}
+                              {!result.condition_details && (
+                                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                                  <p className="text-xs text-yellow-800">
+                                    ⚠️ この評価は古い形式で保存されています。入力条件の詳細情報を確認するには、再度評価を実行してください。
+                                  </p>
+                                </div>
+                              )}
 
                             {/* 指標 */}
                             <div className="grid grid-cols-4 gap-2 text-xs mb-3">
@@ -694,60 +878,126 @@ export default function EvaluatePage() {
                               </div>
                             </div>
 
-                            {/* 検索結果 */}
-                            <div className="mb-3">
-                              <h5 className="font-semibold text-xs mb-2">
-                                検索結果 (Candidates)
-                              </h5>
-                              <div className="flex flex-wrap gap-1">
-                                {result.candidates.map((candidate) => {
-                                  const isCorrect = result.ground_truth.some(
-                                    (gt) => gt.noteId === candidate.noteId
-                                  );
-                                  return (
-                                    <span
-                                      key={candidate.rank}
-                                      className={`px-2 py-1 rounded text-xs ${
-                                        isCorrect
-                                          ? 'bg-green-100 text-green-800 border border-green-300'
-                                          : 'bg-gray-100 text-gray-600 border border-gray-300'
-                                      }`}
-                                      title={`順位 ${candidate.rank}${isCorrect ? ' (正解)' : ''}`}
-                                    >
-                                      {candidate.noteId}
-                                    </span>
-                                  );
-                                })}
+                            {/* 検索結果（リランキング後） */}
+                            {result.candidates && result.candidates.length > 0 ? (
+                              <div className="mb-3">
+                                <h5 className="font-semibold text-xs mb-2">
+                                  検索結果（リランキング後、Top 10）
+                                </h5>
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full text-xs border border-gray-300">
+                                    <thead className="bg-gray-100">
+                                      <tr>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">ランク</th>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">ノートID</th>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">スコア</th>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">正解</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {result.candidates.map((candidate) => {
+                                        const isCorrect = result.ground_truth?.some(
+                                          (gt) => gt.noteId === candidate.noteId
+                                        ) || false;
+                                        return (
+                                          <tr
+                                            key={candidate.rank}
+                                            className={isCorrect ? 'bg-green-50' : ''}
+                                          >
+                                            <td className="px-2 py-1 border-b border-gray-200">{candidate.rank}</td>
+                                            <td className="px-2 py-1 border-b border-gray-200 font-mono">
+                                              {candidate.noteId}
+                                            </td>
+                                            <td className="px-2 py-1 border-b border-gray-200">
+                                              {candidate.score?.toFixed(3) || 'N/A'}
+                                            </td>
+                                            <td className="px-2 py-1 border-b border-gray-200">
+                                              {isCorrect ? (
+                                                <span className="text-green-600 font-bold">✓</span>
+                                              ) : (
+                                                <span className="text-gray-400">-</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="mb-3 p-3 bg-gray-50 border border-gray-300 rounded">
+                                <p className="text-xs text-gray-600">検索結果がありません</p>
+                              </div>
+                            )}
 
                             {/* 正解データ */}
-                            <div>
-                              <h5 className="font-semibold text-xs mb-2">
-                                正解データ (Ground Truth)
-                              </h5>
-                              <div className="flex flex-wrap gap-1">
-                                {result.ground_truth.map((gt) => (
-                                  <span
-                                    key={gt.rank}
-                                    className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800 border border-blue-300"
-                                    title={`正解順位 ${gt.rank}`}
-                                  >
-                                    {gt.noteId}
-                                  </span>
-                                ))}
+                            {result.ground_truth && result.ground_truth.length > 0 ? (
+                              <div>
+                                <h5 className="font-semibold text-xs mb-2">
+                                  正解データ (Ground Truth、Top 10)
+                                </h5>
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full text-xs border border-gray-300">
+                                    <thead className="bg-gray-100">
+                                      <tr>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">正解順位</th>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">ノートID</th>
+                                        <th className="px-2 py-1 border-b border-gray-300 text-left">検出</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {result.ground_truth.map((gt) => {
+                                        const wasFound = result.candidates?.some(
+                                          (c) => c.noteId === gt.noteId
+                                        ) || false;
+                                        const foundRank = result.candidates?.find(
+                                          (c) => c.noteId === gt.noteId
+                                        )?.rank;
+                                        return (
+                                          <tr key={gt.rank} className={wasFound ? 'bg-green-50' : 'bg-red-50'}>
+                                            <td className="px-2 py-1 border-b border-gray-200">{gt.rank}</td>
+                                            <td className="px-2 py-1 border-b border-gray-200 font-mono">
+                                              {gt.noteId}
+                                            </td>
+                                            <td className="px-2 py-1 border-b border-gray-200">
+                                              {wasFound ? (
+                                                <span className="text-green-600 font-bold">
+                                                  ✓ (ランク {foundRank})
+                                                </span>
+                                              ) : (
+                                                <span className="text-red-600">✗ 未検出</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="p-3 bg-gray-50 border border-gray-300 rounded">
+                                <p className="text-xs text-gray-600">正解データがありません</p>
+                              </div>
+                            )}
                           </div>
-                        ))}
+                        ))
+                        ) : (
+                          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
+                            <p className="text-sm text-yellow-800">
+                              評価結果がありません。評価を実行してください。
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

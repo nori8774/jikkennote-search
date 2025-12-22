@@ -103,7 +103,15 @@ class SearchAgent:
     def _normalize_node(self, state: AgentState):
         """正規化ノード"""
         start_time = time.time()
-        print("\n--- 🚀 [1/4] 正規化 & JSON解析 ---")
+        evaluation_mode = state.get("evaluation_mode", False)
+
+        if evaluation_mode:
+            print("\n" + "="*80)
+            print("🔬 [評価モード] 性能評価実行中")
+            print("="*80)
+            print("\n--- 🚀 [1/3] 正規化 & JSON解析 ---")
+        else:
+            print("\n--- 🚀 [1/4] 正規化 & JSON解析 ---")
 
         updates = {}
         messages = state.get("messages", [])
@@ -169,6 +177,16 @@ class SearchAgent:
         normalized_str = "\n".join(normalized_parts) if normalized_parts else raw_materials
         updates["normalized_materials"] = normalized_str
 
+        # 評価モード時に入力情報を詳細表示
+        if evaluation_mode:
+            print("\n  📋 [入力情報]")
+            print(f"  目的: {updates.get('input_purpose', state.get('input_purpose', ''))}")
+            print(f"  材料: {updates.get('input_materials', state.get('input_materials', ''))}")
+            print(f"  実験手法: {updates.get('input_methods', state.get('input_methods', ''))}")
+            print(f"  重点指示: {updates.get('user_focus_instruction', state.get('user_focus_instruction', ''))}")
+            print(f"\n  📝 [正規化後の材料]")
+            print(f"  {normalized_str}")
+
         elapsed_time = time.time() - start_time
         print(f"  ⏱️ Execution Time: {elapsed_time:.4f} sec")
         return updates
@@ -176,7 +194,12 @@ class SearchAgent:
     def _generate_query_node(self, state: AgentState):
         """クエリ生成ノード"""
         start_time = time.time()
-        print("--- 🧠 [2/4] 多角的検索クエリ生成 ---")
+        evaluation_mode = state.get("evaluation_mode", False)
+
+        if evaluation_mode:
+            print("\n--- 🧠 [2/3] 多角的検索クエリ生成 ---")
+        else:
+            print("--- 🧠 [2/4] 多角的検索クエリ生成 ---")
 
         instruction = state.get('user_focus_instruction', '特になし')
 
@@ -204,7 +227,17 @@ class SearchAgent:
                 raise ValueError("Empty queries")
 
             combined_query = " ".join(queries)
-            print(f"  > Generated Query: {combined_query[:100]}...")
+
+            # 評価モード時はクエリ全体を表示
+            if evaluation_mode:
+                print(f"\n  🔍 [生成されたクエリ]")
+                print(f"  統合クエリ（{len(queries)}個のクエリを結合）:")
+                print(f"  {combined_query}")
+                print(f"\n  各クエリの詳細:")
+                for i, q in enumerate(queries, 1):
+                    print(f"    {i}. {q}")
+            else:
+                print(f"  > Generated Query: {combined_query[:100]}...")
 
         except Exception as e:
             print(f"  > ⚠️ Query Parse Error: {e}")
@@ -247,8 +280,12 @@ class SearchAgent:
                 top_n=config.RERANK_TOP_N
             )
 
-            print(f"\n  📊 [Console Log] Top {config.RERANK_TOP_N} Cohere Rerank Results:")
-            print(f"  --------------------------------------------------")
+            if evaluation_mode:
+                print(f"\n  📊 [リランキング結果] Top {config.RERANK_TOP_N} 件")
+                print(f"  " + "="*76)
+            else:
+                print(f"\n  📊 [Console Log] Top {config.RERANK_TOP_N} Cohere Rerank Results:")
+                print(f"  --------------------------------------------------")
 
             docs_for_ui = []
 
@@ -261,16 +298,20 @@ class SearchAgent:
                 score = result.relevance_score
                 snippet = original_doc.page_content[:50].replace('\n', ' ')
 
-                print(f"  Rank {i+1:2d} | Score: {score:.4f} | ID: {source_id} | {snippet}...")
+                if evaluation_mode:
+                    print(f"  Rank {i+1:2d} | Score: {score:.6f} | ノートID: {source_id}")
+                else:
+                    print(f"  Rank {i+1:2d} | Score: {score:.4f} | ID: {source_id} | {snippet}...")
 
                 # 評価モードなら全件、通常モードなら上位3件のみ保存
                 if i < display_limit:
                     docs_for_ui.append(f"【実験ノートID: {source_id}】\n{original_doc.page_content}")
 
-            print(f"  --------------------------------------------------")
             if evaluation_mode:
-                print(f"  > 評価モード: 上位 {len(docs_for_ui)} 件を返却します。")
+                print(f"  " + "="*76)
+                print(f"  ✅ 評価用に上位 {len(docs_for_ui)} 件を返却します。")
             else:
+                print(f"  --------------------------------------------------")
                 print(f"  > UI向けに上位 {len(docs_for_ui)} 件を選択しました。")
 
         except Exception as e:
@@ -279,6 +320,13 @@ class SearchAgent:
 
         elapsed_time = time.time() - start_time
         print(f"  ⏱️ Execution Time: {elapsed_time:.4f} sec")
+
+        # 評価モード時は終了メッセージを表示
+        if evaluation_mode:
+            print("\n" + "="*80)
+            print("✅ 評価モード終了 - 比較ノードをスキップして結果を返却します")
+            print("="*80 + "\n")
+
         return {
             "retrieved_docs": docs_for_ui,
             "iteration": state.get("iteration", 0) + 1
