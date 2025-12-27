@@ -71,26 +71,37 @@ def get_existing_ids(vectorstore) -> List[str]:
 def ingest_notes(
     api_key: str,
     source_folder: str = None,
-    post_action: str = 'keep',
+    post_action: str = 'move_to_processed',
     archive_folder: str = None,
-    embedding_model: str = None
+    embedding_model: str = None,
+    rebuild_mode: bool = False
 ) -> Tuple[List[str], List[str]]:
     """
     ノートをデータベースに取り込む（増分更新）
 
     Args:
         api_key: OpenAI APIキー
-        source_folder: 新規ノートフォルダパス
-        post_action: 取り込み後のアクション ('delete', 'archive', 'keep')
-        archive_folder: アーカイブ先フォルダパス
+        source_folder: 新規ノートフォルダパス（デフォルト: notes/new）
+        post_action: 取り込み後のアクション ('move_to_processed', 'delete', 'archive', 'keep')
+        archive_folder: アーカイブ先フォルダパス（後方互換性のため残す）
         embedding_model: 使用するEmbeddingモデル
+        rebuild_mode: ChromaDBリセット後の再構築モード（デフォルト: False）
 
     Returns:
         (new_notes, skipped_notes): 取り込んだノートIDと既存のノートID
     """
     # パラメータのデフォルト値設定
-    source_folder = source_folder or config.NOTES_NEW_FOLDER
+    if rebuild_mode:
+        # 再構築モード：notes/processedから全て読み込む
+        source_folder = source_folder or config.NOTES_PROCESSED_FOLDER
+        post_action = 'keep'  # 再構築時はファイルを移動しない
+    else:
+        # 通常モード：notes/newから読み込む
+        source_folder = source_folder or config.NOTES_NEW_FOLDER
+        post_action = post_action or 'move_to_processed'
+
     archive_folder = archive_folder or config.NOTES_ARCHIVE_FOLDER
+    processed_folder = config.NOTES_PROCESSED_FOLDER
     embedding_model = embedding_model or config.DEFAULT_EMBEDDING_MODEL
 
     # フォルダ確認（ストレージ抽象化に対応）
@@ -105,8 +116,13 @@ def ingest_notes(
     vectorstore = get_chroma_vectorstore(embeddings, embedding_model=embedding_model)
 
     # 既存データの確認（増分更新のため）
-    existing_ids = get_existing_ids(vectorstore)
-    print(f"既存の登録ノート数: {len(existing_ids)}")
+    if rebuild_mode:
+        # 再構築モード：既存IDのチェックをスキップ（全て取り込む）
+        existing_ids = []
+        print("再構築モード: 全てのノートを取り込みます")
+    else:
+        existing_ids = get_existing_ids(vectorstore)
+        print(f"既存の登録ノート数: {len(existing_ids)}")
 
     # ファイルスキャンと新規判定
     files = storage.list_files(prefix=source_folder, pattern="*.md")
@@ -117,8 +133,8 @@ def ingest_notes(
     for file in files:
         note_id = file.split('/')[-1].replace('.md', '')
 
-        # 既にDBにあるIDならスキップ
-        if note_id in existing_ids:
+        # 既にDBにあるIDならスキップ（再構築モードではスキップしない）
+        if not rebuild_mode and note_id in existing_ids:
             print(f"Skip: {note_id} (既に存在します)")
             skipped_ids.append(note_id)
             continue
@@ -166,12 +182,19 @@ def ingest_notes(
         for note_id in new_ids:
             file_path = f"{source_folder}/{note_id}.md"
 
-            if post_action == 'delete':
+            if post_action == 'move_to_processed':
+                # processedフォルダに移動（デフォルト動作）
+                storage.mkdir(processed_folder)
+                dest_path = f"{processed_folder}/{note_id}.md"
+                storage.move_file(file_path, dest_path)
+                print(f"  Moved to processed: {file_path} -> {dest_path}")
+
+            elif post_action == 'delete':
                 storage.delete_file(file_path)
                 print(f"  Deleted: {file_path}")
 
             elif post_action == 'archive':
-                # アーカイブフォルダ作成
+                # アーカイブフォルダ作成（後方互換性のため残す）
                 storage.mkdir(archive_folder)
                 dest_path = f"{archive_folder}/{note_id}.md"
                 storage.move_file(file_path, dest_path)

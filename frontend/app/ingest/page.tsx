@@ -26,9 +26,10 @@ interface NewTerm {
 
 export default function IngestPage() {
   const [sourceFolder, setSourceFolder] = useState('');
-  const [postAction, setPostAction] = useState<'delete' | 'archive' | 'keep'>('keep');
+  const [postAction, setPostAction] = useState<'delete' | 'archive' | 'keep' | 'move_to_processed'>('move_to_processed');
   const [archiveFolder, setArchiveFolder] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rebuildLoading, setRebuildLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -82,6 +83,44 @@ export default function IngestPage() {
       setError(err.message || 'ノートの取り込みに失敗しました');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRebuild = async () => {
+    setError('');
+    setSuccess('');
+    setRebuildLoading(true);
+    setIngestResult(null);
+
+    try {
+      const openaiApiKey = storage.getOpenAIApiKey();
+      if (!openaiApiKey) {
+        throw new Error('OpenAI APIキーが設定されていません');
+      }
+
+      const embeddingModel = storage.getEmbeddingModel();
+
+      // rebuild_mode=trueで実行
+      const response = await api.ingest({
+        openai_api_key: openaiApiKey,
+        source_folder: undefined, // processedフォルダから読み込む
+        post_action: 'keep', // 再構築時はファイルを移動しない
+        archive_folder: undefined,
+        embedding_model: embeddingModel || undefined,
+        rebuild_mode: true,
+      });
+
+      if (response.success) {
+        setIngestResult({
+          new_notes: response.new_notes,
+          skipped_notes: response.skipped_notes,
+        });
+        setSuccess(response.message);
+      }
+    } catch (err: any) {
+      setError(err.message || 'ChromaDBの再構築に失敗しました');
+    } finally {
+      setRebuildLoading(false);
     }
   };
 
@@ -167,22 +206,33 @@ export default function IngestPage() {
       <div className="container mx-auto p-8">
         <h1 className="text-3xl font-bold mb-8">ノート取り込み</h1>
 
+        {/* ChromaDB再構築セクション */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg shadow-lg p-6 mb-8">
+          <h2 className="text-xl font-bold mb-2 text-blue-900">ChromaDB再構築</h2>
+          <p className="text-sm text-blue-700 mb-4">
+            Embeddingモデルを変更した後は、既存のノート（processedフォルダ）からChromaDBを再構築してください。
+          </p>
+          <Button onClick={handleRebuild} disabled={rebuildLoading || loading || analyzing}>
+            {rebuildLoading ? '再構築中...' : 'ChromaDBを再構築'}
+          </Button>
+        </div>
+
         {/* 設定フォーム */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-          <h2 className="text-xl font-bold mb-4">取り込み設定</h2>
+          <h2 className="text-xl font-bold mb-4">新規ノート取り込み</h2>
 
           <div className="space-y-4">
             {/* ソースフォルダ */}
             <div>
               <label className="block text-sm font-medium mb-2">
-                ソースフォルダ（空欄の場合はデフォルト）
+                ソースフォルダ（空欄の場合はデフォルト: notes/new）
               </label>
               <input
                 type="text"
                 className="w-full border border-gray-300 rounded-md p-3"
                 value={sourceFolder}
                 onChange={(e) => setSourceFolder(e.target.value)}
-                placeholder="./notes/new"
+                placeholder="notes/new"
               />
               <p className="text-sm text-text-secondary mt-1">
                 取り込む新規ノートが保存されているフォルダ
@@ -197,10 +247,14 @@ export default function IngestPage() {
                 value={postAction}
                 onChange={(e) => setPostAction(e.target.value as any)}
               >
+                <option value="move_to_processed">processedフォルダへ移動（推奨）</option>
                 <option value="keep">ファイルを残す</option>
                 <option value="archive">アーカイブフォルダへ移動</option>
                 <option value="delete">ファイルを削除</option>
               </select>
+              <p className="text-sm text-text-secondary mt-1">
+                推奨: processedフォルダへ移動。ChromaDB再構築時にこのフォルダから読み込みます。
+              </p>
             </div>
 
             {/* アーカイブフォルダ */}

@@ -39,9 +39,10 @@ export interface PromptsResponse {
 export interface IngestRequest {
   openai_api_key: string;
   source_folder?: string;
-  post_action?: 'delete' | 'archive' | 'keep';
+  post_action?: 'delete' | 'archive' | 'keep' | 'move_to_processed';
   archive_folder?: string;
   embedding_model?: string;
+  rebuild_mode?: boolean;
 }
 
 export interface IngestResponse {

@@ -53,6 +53,7 @@ class HealthResponse(BaseModel):
 
 class FolderPathsRequest(BaseModel):
     notes_new: Optional[str] = None
+    notes_processed: Optional[str] = None
     notes_archive: Optional[str] = None
     chroma_db: Optional[str] = None
 
@@ -93,9 +94,10 @@ class PromptsResponse(BaseModel):
 class IngestRequest(BaseModel):
     openai_api_key: str
     source_folder: Optional[str] = None
-    post_action: str = 'keep'  # 'delete', 'archive', 'keep'
+    post_action: str = 'move_to_processed'  # 'delete', 'archive', 'keep', 'move_to_processed'
     archive_folder: Optional[str] = None
     embedding_model: Optional[str] = None
+    rebuild_mode: bool = False  # ChromaDBリセット後の再構築モード
 
 
 class IngestResponse(BaseModel):
@@ -223,6 +225,7 @@ async def health_check():
         version="2.0.0",
         config={
             "notes_new": config.NOTES_NEW_FOLDER,
+            "notes_processed": config.NOTES_PROCESSED_FOLDER,
             "notes_archive": config.NOTES_ARCHIVE_FOLDER,
             "chroma_db": config.CHROMA_DB_FOLDER,
             "master_dict": config.MASTER_DICTIONARY_PATH,
@@ -236,6 +239,7 @@ async def update_folder_paths(request: FolderPathsRequest):
     try:
         config.update_folder_paths(
             notes_new=request.notes_new,
+            notes_processed=request.notes_processed,
             notes_archive=request.notes_archive,
             chroma_db=request.chroma_db
         )
@@ -245,6 +249,7 @@ async def update_folder_paths(request: FolderPathsRequest):
             message="フォルダパス設定を更新しました",
             paths={
                 "notes_new": config.NOTES_NEW_FOLDER,
+                "notes_processed": config.NOTES_PROCESSED_FOLDER,
                 "notes_archive": config.NOTES_ARCHIVE_FOLDER,
                 "chroma_db": config.CHROMA_DB_FOLDER,
             }
@@ -263,6 +268,7 @@ async def get_folder_paths():
         "success": True,
         "paths": {
             "notes_new": config.NOTES_NEW_FOLDER,
+            "notes_processed": config.NOTES_PROCESSED_FOLDER,
             "notes_archive": config.NOTES_ARCHIVE_FOLDER,
             "chroma_db": config.CHROMA_DB_FOLDER,
             "master_dict": config.MASTER_DICTIONARY_PATH,
@@ -337,19 +343,25 @@ async def get_default_prompts():
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_notes_endpoint(request: IngestRequest):
-    """ノート取り込み（増分更新）"""
+    """ノート取り込み（増分更新 or ChromaDB再構築）"""
     try:
         new_notes, skipped_notes = ingest_notes(
             api_key=request.openai_api_key,
             source_folder=request.source_folder,
             post_action=request.post_action,
             archive_folder=request.archive_folder,
-            embedding_model=request.embedding_model
+            embedding_model=request.embedding_model,
+            rebuild_mode=request.rebuild_mode
         )
+
+        if request.rebuild_mode:
+            message = f"ChromaDB再構築完了: {len(new_notes)}件のノートを取り込みました。"
+        else:
+            message = f"{len(new_notes)}件の新規ノートを追加しました。{len(skipped_notes)}件はスキップされました。"
 
         return IngestResponse(
             success=True,
-            message=f"{len(new_notes)}件の新規ノートを追加しました。{len(skipped_notes)}件はスキップされました。",
+            message=message,
             new_notes=new_notes,
             skipped_notes=skipped_notes
         )
@@ -363,9 +375,9 @@ async def ingest_notes_endpoint(request: IngestRequest):
 async def get_note(note_id: str):
     """実験ノートを取得"""
     try:
-        # ノートファイルを検索（notes_new または notes_archive から）
+        # ノートファイルを検索（notes_new, notes_processed または notes_archive から）
         note_file = None
-        for folder in [config.NOTES_NEW_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
+        for folder in [config.NOTES_NEW_FOLDER, config.NOTES_PROCESSED_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
             potential_file = f"{folder}/{note_id}.md"
             try:
                 # storage抽象化レイヤーを使用してファイルの存在確認
@@ -429,7 +441,7 @@ async def analyze_new_terms(request: AnalyzeRequest):
             for note_id in request.note_ids:
                 # ノートファイルを検索
                 note_file = None
-                for folder in [config.NOTES_NEW_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
+                for folder in [config.NOTES_NEW_FOLDER, config.NOTES_PROCESSED_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
                     potential_file = f"{folder}/{note_id}.md"
                     try:
                         content = storage.read_file(potential_file)
@@ -1019,7 +1031,7 @@ async def reset_chroma_db_endpoint():
         if success:
             return ChromaDBResetResponse(
                 success=True,
-                message="ChromaDBをリセットしました。新しいノートを取り込んでデータベースを再構築してください。"
+                message="ChromaDBをリセットしました。「ChromaDBを再構築」ボタンをクリックして、既存ノートからデータベースを再構築してください。"
             )
         else:
             raise HTTPException(status_code=500, detail="ChromaDBのリセットに失敗しました")

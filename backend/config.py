@@ -13,7 +13,8 @@ class Config:
 
     # フォルダパス設定（GCS環境では "notes/new" のようにパスを指定）
     NOTES_NEW_FOLDER = os.getenv("NOTES_NEW_FOLDER", "notes/new")
-    NOTES_ARCHIVE_FOLDER = os.getenv("NOTES_ARCHIVE_FOLDER", "notes/archived")
+    NOTES_PROCESSED_FOLDER = os.getenv("NOTES_PROCESSED_FOLDER", "notes/processed")
+    NOTES_ARCHIVE_FOLDER = os.getenv("NOTES_ARCHIVE_FOLDER", "notes/archived")  # 後方互換性のため残す
     CHROMA_DB_FOLDER = os.getenv("CHROMA_DB_FOLDER", "/tmp/chroma_db")
     MASTER_DICTIONARY_PATH = os.getenv("MASTER_DICTIONARY_PATH", "master_dictionary.yaml")
 
@@ -31,14 +32,17 @@ class Config:
     def ensure_folders(cls):
         """必要なフォルダを作成"""
         Path(cls.NOTES_NEW_FOLDER).mkdir(parents=True, exist_ok=True)
+        Path(cls.NOTES_PROCESSED_FOLDER).mkdir(parents=True, exist_ok=True)
         Path(cls.NOTES_ARCHIVE_FOLDER).mkdir(parents=True, exist_ok=True)
         Path(cls.CHROMA_DB_FOLDER).mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def update_folder_paths(cls, notes_new: str = None, notes_archive: str = None, chroma_db: str = None):
+    def update_folder_paths(cls, notes_new: str = None, notes_processed: str = None, notes_archive: str = None, chroma_db: str = None):
         """フォルダパスを動的に更新"""
         if notes_new:
             cls.NOTES_NEW_FOLDER = notes_new
+        if notes_processed:
+            cls.NOTES_PROCESSED_FOLDER = notes_processed
         if notes_archive:
             cls.NOTES_ARCHIVE_FOLDER = notes_archive
         if chroma_db:
