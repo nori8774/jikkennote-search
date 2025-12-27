@@ -36,6 +36,8 @@
 
 Railwayのダッシュボードで以下の環境変数を設定：
 
+#### 基本設定
+
 ```bash
 # CORS設定（Vercelのドメインに置き換え）
 CORS_ORIGINS=https://your-app.vercel.app,http://localhost:3000
@@ -45,10 +47,40 @@ HOST=0.0.0.0
 PORT=8000
 
 # フォルダパス設定（デフォルト値で問題なければ省略可）
-NOTES_NEW_FOLDER=/app/notes/new
-NOTES_ARCHIVE_FOLDER=/app/notes/archived
+NOTES_NEW_FOLDER=notes/new
+NOTES_PROCESSED_FOLDER=notes/processed
+NOTES_ARCHIVE_FOLDER=notes/archived
 CHROMA_DB_FOLDER=/app/chroma_db
-MASTER_DICT_PATH=/app/master_dictionary.yaml
+MASTER_DICTIONARY_PATH=master_dictionary.yaml
+```
+
+#### Google Drive統合（オプション） ⭐
+
+Google Driveを使用してノートを共有する場合：
+
+```bash
+# ストレージタイプ（local / gcs / google_drive）
+STORAGE_TYPE=google_drive
+
+# Google Drive設定
+GOOGLE_DRIVE_FOLDER_ID=your_shared_folder_id
+GOOGLE_DRIVE_CREDENTIALS_PATH=/app/google-credentials.json
+```
+
+**Google Drive認証情報の設定**:
+
+1. Google Cloud Consoleでサービスアカウントを作成
+2. サービスアカウントキー（JSON）をダウンロード
+3. Railwayの環境変数 `GOOGLE_DRIVE_CREDENTIALS_JSON` に JSON内容を設定
+4. `server.py` の起動時に環境変数から `/app/google-credentials.json` に書き出し
+
+**共有フォルダの構成**:
+```
+📁 共有フォルダ（GOOGLE_DRIVE_FOLDER_ID）
+├── 📁 notes/
+│   ├── 📁 new/        ← 新規ノート
+│   └── 📁 processed/  ← 取り込み済みノート
+└── 📄 master_dictionary.yaml ← 正規化辞書
 ```
 
 ### 1.3 ボリュームのマウント（オプション）
