@@ -233,16 +233,374 @@ class GCSStorage(StorageBackend):
         blob.upload_from_filename(local_path)
 
 
+class GoogleDriveStorage(StorageBackend):
+    """Google Drive APIのストレージバックエンド"""
+
+    def __init__(self, credentials_path: str, folder_id: str):
+        """
+        Google Drive Storage初期化
+
+        Args:
+            credentials_path: サービスアカウントのJSONキーファイルパス
+            folder_id: 共有フォルダのID
+        """
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+        from google.oauth2 import service_account
+        import io
+
+        self.credentials_path = credentials_path
+        self.folder_id = folder_id
+
+        # 認証情報の設定
+        SCOPES = ['https://www.googleapis.com/auth/drive']
+        credentials = service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=SCOPES
+        )
+
+        # Drive APIクライアントの構築
+        self.service = build('drive', 'v3', credentials=credentials)
+        self.io = io
+
+    def _get_file_id(self, path: str) -> Optional[str]:
+        """パスからGoogle DriveのファイルIDを取得"""
+        # パスを分割（例: "notes/new/ID3-14.md" -> ["notes", "new", "ID3-14.md"]）
+        parts = path.split('/')
+
+        current_folder_id = self.folder_id
+
+        # フォルダ階層を辿る
+        for i, part in enumerate(parts):
+            is_last = (i == len(parts) - 1)
+
+            # 現在のフォルダ内でファイル/フォルダを検索
+            query = f"name='{part}' and '{current_folder_id}' in parents and trashed=false"
+            results = self.service.files().list(
+                q=query,
+                fields='files(id, name, mimeType)'
+            ).execute()
+
+            files = results.get('files', [])
+
+            if not files:
+                return None
+
+            file_item = files[0]
+
+            if is_last:
+                return file_item['id']
+            else:
+                current_folder_id = file_item['id']
+
+        return None
+
+    def _create_folder_path(self, path: str) -> str:
+        """フォルダパスを作成し、最終フォルダのIDを返す"""
+        parts = path.split('/')
+        current_folder_id = self.folder_id
+
+        for part in parts:
+            # フォルダが既に存在するか確認
+            query = f"name='{part}' and '{current_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            results = self.service.files().list(
+                q=query,
+                fields='files(id)'
+            ).execute()
+
+            files = results.get('files', [])
+
+            if files:
+                current_folder_id = files[0]['id']
+            else:
+                # フォルダを作成
+                file_metadata = {
+                    'name': part,
+                    'mimeType': 'application/vnd.google-apps.folder',
+                    'parents': [current_folder_id]
+                }
+                folder = self.service.files().create(
+                    body=file_metadata,
+                    fields='id'
+                ).execute()
+                current_folder_id = folder['id']
+
+        return current_folder_id
+
+    def read_file(self, path: str) -> str:
+        """ファイルを読み込む"""
+        from googleapiclient.http import MediaIoBaseDownload
+
+        file_id = self._get_file_id(path)
+        if not file_id:
+            raise FileNotFoundError(f"File not found: {path}")
+
+        request = self.service.files().get_media(fileId=file_id)
+        fh = self.io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+
+        fh.seek(0)
+        return fh.read().decode('utf-8')
+
+    def write_file(self, path: str, content: str) -> None:
+        """ファイルに書き込む"""
+        from googleapiclient.http import MediaIoBaseUpload
+
+        # パスを分割
+        parts = path.split('/')
+        filename = parts[-1]
+        folder_path = '/'.join(parts[:-1]) if len(parts) > 1 else ''
+
+        # 親フォルダのIDを取得または作成
+        if folder_path:
+            parent_folder_id = self._create_folder_path(folder_path)
+        else:
+            parent_folder_id = self.folder_id
+
+        # 既存ファイルを確認
+        existing_file_id = self._get_file_id(path)
+
+        # メディアのアップロード準備
+        media = MediaIoBaseUpload(
+            self.io.BytesIO(content.encode('utf-8')),
+            mimetype='text/plain',
+            resumable=True
+        )
+
+        if existing_file_id:
+            # 既存ファイルを更新
+            self.service.files().update(
+                fileId=existing_file_id,
+                media_body=media
+            ).execute()
+        else:
+            # 新規ファイルを作成
+            file_metadata = {
+                'name': filename,
+                'parents': [parent_folder_id]
+            }
+            self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+    def read_bytes(self, path: str) -> bytes:
+        """バイナリファイルを読み込む"""
+        from googleapiclient.http import MediaIoBaseDownload
+
+        file_id = self._get_file_id(path)
+        if not file_id:
+            raise FileNotFoundError(f"File not found: {path}")
+
+        request = self.service.files().get_media(fileId=file_id)
+        fh = self.io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+
+        fh.seek(0)
+        return fh.read()
+
+    def write_bytes(self, path: str, content: bytes) -> None:
+        """バイナリファイルに書き込む"""
+        from googleapiclient.http import MediaIoBaseUpload
+
+        parts = path.split('/')
+        filename = parts[-1]
+        folder_path = '/'.join(parts[:-1]) if len(parts) > 1 else ''
+
+        if folder_path:
+            parent_folder_id = self._create_folder_path(folder_path)
+        else:
+            parent_folder_id = self.folder_id
+
+        existing_file_id = self._get_file_id(path)
+
+        media = MediaIoBaseUpload(
+            self.io.BytesIO(content),
+            mimetype='application/octet-stream',
+            resumable=True
+        )
+
+        if existing_file_id:
+            self.service.files().update(
+                fileId=existing_file_id,
+                media_body=media
+            ).execute()
+        else:
+            file_metadata = {
+                'name': filename,
+                'parents': [parent_folder_id]
+            }
+            self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+    def list_files(self, prefix: str = "", pattern: str = "*") -> List[str]:
+        """ファイル一覧を取得"""
+        import fnmatch
+
+        # プレフィックスからフォルダIDを取得
+        if prefix:
+            folder_id = self._get_file_id(prefix)
+            if not folder_id:
+                return []
+        else:
+            folder_id = self.folder_id
+
+        # フォルダ内のファイルを再帰的に取得
+        def list_recursive(current_folder_id: str, current_path: str = "") -> List[str]:
+            files = []
+
+            query = f"'{current_folder_id}' in parents and trashed=false"
+            results = self.service.files().list(
+                q=query,
+                fields='files(id, name, mimeType)'
+            ).execute()
+
+            items = results.get('files', [])
+
+            for item in items:
+                item_path = f"{current_path}/{item['name']}" if current_path else item['name']
+
+                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                    # サブフォルダを再帰的に探索
+                    files.extend(list_recursive(item['id'], item_path))
+                else:
+                    # パターンマッチング
+                    if pattern == "*" or fnmatch.fnmatch(item['name'], pattern):
+                        # プレフィックスを含めた完全なパスを返す
+                        full_path = f"{prefix}/{item_path}" if prefix else item_path
+                        files.append(full_path)
+
+            return files
+
+        return sorted(list_recursive(folder_id, ""))
+
+    def exists(self, path: str) -> bool:
+        """ファイルの存在確認"""
+        return self._get_file_id(path) is not None
+
+    def delete_file(self, path: str) -> None:
+        """ファイルを削除"""
+        file_id = self._get_file_id(path)
+        if file_id:
+            self.service.files().delete(fileId=file_id).execute()
+
+    def move_file(self, src: str, dst: str) -> None:
+        """ファイルを移動"""
+        file_id = self._get_file_id(src)
+        if not file_id:
+            raise FileNotFoundError(f"Source file not found: {src}")
+
+        # 移動先のパスを分割
+        dst_parts = dst.split('/')
+        dst_filename = dst_parts[-1]
+        dst_folder_path = '/'.join(dst_parts[:-1]) if len(dst_parts) > 1 else ''
+
+        # 移動先のフォルダIDを取得または作成
+        if dst_folder_path:
+            dst_folder_id = self._create_folder_path(dst_folder_path)
+        else:
+            dst_folder_id = self.folder_id
+
+        # 現在の親フォルダを取得
+        file = self.service.files().get(
+            fileId=file_id,
+            fields='parents'
+        ).execute()
+        previous_parents = ",".join(file.get('parents', []))
+
+        # ファイルを移動（親を変更）
+        self.service.files().update(
+            fileId=file_id,
+            addParents=dst_folder_id,
+            removeParents=previous_parents,
+            body={'name': dst_filename},
+            fields='id, parents'
+        ).execute()
+
+    def mkdir(self, path: str) -> None:
+        """ディレクトリを作成"""
+        self._create_folder_path(path)
+
+    def download_to_local(self, remote_path: str, local_path: str) -> None:
+        """Google Driveからローカルにダウンロード"""
+        from googleapiclient.http import MediaIoBaseDownload
+
+        file_id = self._get_file_id(remote_path)
+        if not file_id:
+            raise FileNotFoundError(f"File not found: {remote_path}")
+
+        request = self.service.files().get_media(fileId=file_id)
+
+        Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+
+        with open(local_path, 'wb') as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+
+    def upload_from_local(self, local_path: str, remote_path: str) -> None:
+        """ローカルからGoogle Driveにアップロード"""
+        from googleapiclient.http import MediaFileUpload
+
+        parts = remote_path.split('/')
+        filename = parts[-1]
+        folder_path = '/'.join(parts[:-1]) if len(parts) > 1 else ''
+
+        if folder_path:
+            parent_folder_id = self._create_folder_path(folder_path)
+        else:
+            parent_folder_id = self.folder_id
+
+        existing_file_id = self._get_file_id(remote_path)
+
+        media = MediaFileUpload(local_path, resumable=True)
+
+        if existing_file_id:
+            self.service.files().update(
+                fileId=existing_file_id,
+                media_body=media
+            ).execute()
+        else:
+            file_metadata = {
+                'name': filename,
+                'parents': [parent_folder_id]
+            }
+            self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+
 class Storage:
     """
     統一ストレージインターフェース
-    環境変数でローカル/GCSを自動切り替え
+    環境変数でローカル/GCS/Google Driveを自動切り替え
     """
 
     def __init__(self):
         storage_type = os.getenv("STORAGE_TYPE", "local")
 
-        if storage_type == "gcs":
+        if storage_type == "google_drive":
+            credentials_path = os.getenv("GOOGLE_DRIVE_CREDENTIALS_PATH")
+            folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+            if not credentials_path or not folder_id:
+                raise ValueError("Google Drive requires GOOGLE_DRIVE_CREDENTIALS_PATH and GOOGLE_DRIVE_FOLDER_ID")
+            self.backend = GoogleDriveStorage(credentials_path, folder_id)
+            print(f"Using Google Drive storage: folder_id={folder_id}")
+        elif storage_type == "gcs":
             bucket_name = os.getenv("GCS_BUCKET_NAME", "jikkennote-storage")
             self.backend = GCSStorage(bucket_name)
             print(f"Using GCS storage: gs://{bucket_name}")

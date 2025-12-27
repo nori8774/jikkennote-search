@@ -16,6 +16,8 @@ from config import config
 from utils import load_master_dict, normalize_text
 from storage import storage
 from chroma_sync import get_chroma_vectorstore, sync_chroma_to_gcs
+from term_extractor import TermExtractor
+from dictionary import get_dictionary_manager
 
 
 def parse_markdown_note(file_path: str, norm_map: dict) -> Dict:
@@ -207,3 +209,128 @@ def ingest_notes(
         print("新規に追加すべきノートはありませんでした。")
 
     return new_ids, skipped_ids
+
+
+def ingest_notes_with_auto_dictionary(
+    api_key: str,
+    source_folder: str = None,
+    post_action: str = 'move_to_processed',
+    archive_folder: str = None,
+    embedding_model: str = None,
+    rebuild_mode: bool = False,
+    auto_update_dictionary: bool = True
+) -> Tuple[List[str], List[str], Dict]:
+    """
+    ノートを取り込み、自動的に辞書を更新する（拡張版）
+
+    Args:
+        api_key: OpenAI APIキー
+        source_folder: 新規ノートフォルダパス
+        post_action: 取り込み後のアクション
+        archive_folder: アーカイブ先フォルダパス
+        embedding_model: Embeddingモデル
+        rebuild_mode: 再構築モード
+        auto_update_dictionary: 辞書の自動更新を有効にするか
+
+    Returns:
+        (new_notes, skipped_notes, dictionary_update_result)
+    """
+    # 通常のingestを実行
+    new_ids, skipped_ids = ingest_notes(
+        api_key=api_key,
+        source_folder=source_folder,
+        post_action=post_action,
+        archive_folder=archive_folder,
+        embedding_model=embedding_model,
+        rebuild_mode=rebuild_mode
+    )
+
+    dictionary_result = {
+        'patterns_added': 0,
+        'variants_detected': 0,
+        'auto_updated': False
+    }
+
+    # 辞書自動更新が有効で、新規ノートがある場合
+    if auto_update_dictionary and new_ids:
+        print("\n=== 新出単語抽出と辞書自動更新を開始 ===")
+
+        try:
+            # 辞書マネージャーとTerm Extractorを初期化
+            dict_manager = get_dictionary_manager()
+            term_extractor = TermExtractor(dict_manager, api_key)
+
+            # 全ての新出パターンを収集
+            all_patterns = set()
+            all_new_notes_content = []
+
+            # 各新規ノートを分析
+            processed_folder = config.NOTES_PROCESSED_FOLDER if post_action == 'move_to_processed' else source_folder
+
+            for note_id in new_ids:
+                # ノートのパスを決定
+                if post_action == 'move_to_processed':
+                    note_path = f"{processed_folder}/{note_id}.md"
+                else:
+                    note_path = f"{source_folder}/{note_id}.md"
+
+                if not storage.exists(note_path):
+                    print(f"警告: ノートが見つかりません: {note_path}")
+                    continue
+
+                # ノート内容を読み込み
+                note_content = storage.read_file(note_path)
+                all_new_notes_content.append({'id': note_id, 'content': note_content})
+
+                # 材料セクションを抽出
+                materials_section = term_extractor.extract_materials_section(note_content)
+                if materials_section:
+                    # 用語を抽出（複数パターン生成）
+                    patterns = term_extractor.extract_terms_from_text(materials_section)
+                    all_patterns.update(patterns)
+                    print(f"  {note_id}: {len(patterns)}個のパターンを抽出")
+
+            # パターンを辞書に追加
+            if all_patterns:
+                result = dict_manager.auto_update_from_patterns(list(all_patterns))
+                dictionary_result['patterns_added'] = result['added']
+                print(f"\n新規パターンを辞書に追加: {result['added']}個")
+
+                # 表記揺れを自動検出
+                print("\n表記揺れを検出中...")
+                all_terms = list(all_patterns)
+                variant_candidates = term_extractor.auto_detect_variants(
+                    all_terms,
+                    threshold=0.7
+                )
+
+                if variant_candidates:
+                    print(f"表記揺れ候補を{len(variant_candidates)}個検出しました")
+                    dictionary_result['variants_detected'] = len(variant_candidates)
+                    dictionary_result['variant_candidates'] = variant_candidates
+
+                    # 自動承認された表記揺れを辞書に反映（LLMが"variant"と判定したもの）
+                    auto_approved = [
+                        {
+                            'term': cand['term2'],
+                            'decision': 'variant',
+                            'canonical': cand['recommended_canonical'] or cand['term1'],
+                            'note': f"自動検出 (類似度: {cand['combined_similarity']:.2f})"
+                        }
+                        for cand in variant_candidates
+                        if cand['llm_suggestion'] == 'variant'
+                    ]
+
+                    if auto_approved:
+                        update_result = dict_manager.apply_variant_updates(auto_approved)
+                        print(f"表記揺れを自動反映: {update_result['updated']}個更新")
+                        dictionary_result['auto_updated'] = True
+
+                print("\n辞書を保存しました")
+
+        except Exception as e:
+            print(f"辞書自動更新エラー: {e}")
+            import traceback
+            traceback.print_exc()
+
+    return new_ids, skipped_ids, dictionary_result

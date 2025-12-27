@@ -10,6 +10,9 @@ const STORAGE_KEYS = {
   LLM_MODEL: 'llm_model',
   CUSTOM_PROMPTS: 'custom_prompts',
   FOLDER_PATHS: 'folder_paths',
+  STORAGE_TYPE: 'storage_type',
+  GOOGLE_DRIVE_FOLDER_ID: 'google_drive_folder_id',
+  GOOGLE_DRIVE_CREDENTIALS_PATH: 'google_drive_credentials_path',
 };
 
 export const storage = {
@@ -65,6 +68,32 @@ export const storage = {
   getFolderPaths(): Record<string, string> | null {
     const data = localStorage.getItem(STORAGE_KEYS.FOLDER_PATHS);
     return data ? JSON.parse(data) : null;
+  },
+
+  // ストレージタイプ
+  setStorageType(type: 'local' | 'gcs' | 'google_drive') {
+    localStorage.setItem(STORAGE_KEYS.STORAGE_TYPE, type);
+  },
+
+  getStorageType(): 'local' | 'gcs' | 'google_drive' | null {
+    return localStorage.getItem(STORAGE_KEYS.STORAGE_TYPE) as any;
+  },
+
+  // Google Drive設定
+  setGoogleDriveFolderId(id: string) {
+    localStorage.setItem(STORAGE_KEYS.GOOGLE_DRIVE_FOLDER_ID, id);
+  },
+
+  getGoogleDriveFolderId(): string | null {
+    return localStorage.getItem(STORAGE_KEYS.GOOGLE_DRIVE_FOLDER_ID);
+  },
+
+  setGoogleDriveCredentialsPath(path: string) {
+    localStorage.setItem(STORAGE_KEYS.GOOGLE_DRIVE_CREDENTIALS_PATH, path);
+  },
+
+  getGoogleDriveCredentialsPath(): string | null {
+    return localStorage.getItem(STORAGE_KEYS.GOOGLE_DRIVE_CREDENTIALS_PATH);
   },
 
   // 全削除

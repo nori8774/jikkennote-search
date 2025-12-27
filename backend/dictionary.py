@@ -373,6 +373,131 @@ class DictionaryManager:
             print(f"CSVインポートに失敗: {e}")
             return False
 
+    def apply_variant_updates(self, variant_decisions: List[Dict]) -> Dict:
+        """
+        表記揺れ判定結果を辞書に適用
+
+        Args:
+            variant_decisions: [
+                {
+                    "term": "新出単語",
+                    "decision": "variant" or "new",
+                    "canonical": "紐付け先の正規化名",
+                    "category": "カテゴリ",
+                    "note": "メモ"
+                },
+                ...
+            ]
+
+        Returns:
+            {"added": 件数, "updated": 件数, "errors": [エラーメッセージ]}
+        """
+        added_count = 0
+        updated_count = 0
+        errors = []
+
+        for decision in variant_decisions:
+            term = decision.get('term')
+            decision_type = decision.get('decision')
+            canonical = decision.get('canonical')
+            category = decision.get('category')
+            note = decision.get('note')
+
+            try:
+                if decision_type == 'variant':
+                    # 表記揺れとして既存エントリに追加
+                    if not canonical:
+                        errors.append(f"{term}: 紐付け先が指定されていません")
+                        continue
+
+                    entry = self.find_entry_by_canonical(canonical)
+                    if entry:
+                        # 既存エントリにバリアントを追加
+                        if term not in entry.variants and term != canonical:
+                            entry.variants.append(term)
+                            entry.updated_at = datetime.now().isoformat()
+                            updated_count += 1
+                    else:
+                        # 正規化名が存在しない場合は新規作成
+                        self.entries.append(NormalizationEntry(
+                            canonical=canonical,
+                            variants=[term] if term != canonical else [],
+                            category=category,
+                            note=note,
+                            created_at=datetime.now().isoformat(),
+                            updated_at=datetime.now().isoformat()
+                        ))
+                        added_count += 1
+
+                elif decision_type == 'new':
+                    # 新規物質として追加
+                    existing = self.find_entry_by_canonical(term)
+                    if not existing:
+                        self.entries.append(NormalizationEntry(
+                            canonical=term,
+                            variants=[],
+                            category=category,
+                            note=note,
+                            created_at=datetime.now().isoformat(),
+                            updated_at=datetime.now().isoformat()
+                        ))
+                        added_count += 1
+
+            except Exception as e:
+                errors.append(f"{term}: {str(e)}")
+
+        # 保存
+        if added_count > 0 or updated_count > 0:
+            self.save()
+
+        return {
+            'added': added_count,
+            'updated': updated_count,
+            'errors': errors
+        }
+
+    def auto_update_from_patterns(self, all_patterns: List[str]) -> Dict:
+        """
+        複数パターンから自動的に辞書を更新
+
+        Args:
+            all_patterns: 抽出された全パターンのリスト
+
+        Returns:
+            {"added": 件数, "variants_detected": 表記揺れ候補リスト}
+        """
+        added_count = 0
+        new_patterns = []
+
+        # 既存辞書にないパターンを抽出
+        known_terms = set(self.get_all_terms())
+
+        for pattern in all_patterns:
+            if pattern not in known_terms:
+                new_patterns.append(pattern)
+
+        # 新規パターンを辞書に追加（重複チェック付き）
+        for pattern in new_patterns:
+            existing = self.find_entry_by_canonical(pattern)
+            if not existing:
+                self.entries.append(NormalizationEntry(
+                    canonical=pattern,
+                    variants=[],
+                    category=None,
+                    note='自動生成',
+                    created_at=datetime.now().isoformat(),
+                    updated_at=datetime.now().isoformat()
+                ))
+                added_count += 1
+
+        if added_count > 0:
+            self.save()
+
+        return {
+            'added': added_count,
+            'new_patterns': new_patterns
+        }
+
 
 # グローバルインスタンス（シングルトン）
 _dictionary_manager = None

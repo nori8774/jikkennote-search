@@ -20,7 +20,7 @@ export default function SettingsPage() {
   const [llmModel, setLlmModel] = useState('gpt-4o-mini');
   const [defaultPrompts, setDefaultPrompts] = useState<any>(null);
   const [customPrompts, setCustomPrompts] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'api' | 'models' | 'prompts'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'models' | 'prompts' | 'notes'>('api');
   const [saved, setSaved] = useState(false);
 
   // プロンプト保存機能用のステート
@@ -41,6 +41,11 @@ export default function SettingsPage() {
   // 保存ボタンクリック時のEmbeddingモデルの値を保持（キャンセル時の復元用）
   const embeddingModelBeforeSave = useRef<string>('');
 
+  // ノート管理用のステート
+  const [storageType, setStorageType] = useState<'local' | 'gcs' | 'google_drive'>('local');
+  const [googleDriveFolderId, setGoogleDriveFolderId] = useState('');
+  const [googleDriveCredentialsPath, setGoogleDriveCredentialsPath] = useState('');
+
   useEffect(() => {
     // localStorageから設定を読み込む
     setOpenaiKey(storage.getOpenAIApiKey() || '');
@@ -50,6 +55,11 @@ export default function SettingsPage() {
     setOriginalEmbeddingModel(storedEmbeddingModel);
     setLlmModel(storage.getLLMModel() || 'gpt-4o-mini');
     setCustomPrompts(storage.getCustomPrompts() || {});
+
+    // Google Drive設定を読み込む
+    setStorageType(storage.getStorageType() || 'local');
+    setGoogleDriveFolderId(storage.getGoogleDriveFolderId() || '');
+    setGoogleDriveCredentialsPath(storage.getGoogleDriveCredentialsPath() || '');
 
     // 保存済みプロンプト一覧をバックエンドから読み込む
     api.listSavedPrompts().then((res) => {
@@ -106,6 +116,11 @@ export default function SettingsPage() {
     storage.setEmbeddingModel(embeddingModel);
     storage.setLLMModel(llmModel);
     storage.setCustomPrompts(customPrompts);
+
+    // Google Drive設定を保存
+    storage.setStorageType(storageType);
+    storage.setGoogleDriveFolderId(googleDriveFolderId);
+    storage.setGoogleDriveCredentialsPath(googleDriveCredentialsPath);
 
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -261,6 +276,7 @@ export default function SettingsPage() {
               { key: 'api', label: 'APIキー' },
               { key: 'models', label: 'モデル選択' },
               { key: 'prompts', label: 'プロンプト管理' },
+              { key: 'notes', label: 'ノート管理' },
             ].map((tab) => (
               <button
                 key={tab.key}
@@ -573,6 +589,115 @@ export default function SettingsPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ノート管理タブ */}
+          {activeTab === 'notes' && (
+            <div className="space-y-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <h3 className="font-bold mb-2">ノートストレージの設定</h3>
+                <p className="text-sm text-gray-700">
+                  実験ノートの保存先を設定します。Google Driveを使用すると、チーム全体でノートを共有できます。
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">ストレージタイプ</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md p-3"
+                  value={storageType}
+                  onChange={(e) => setStorageType(e.target.value as any)}
+                >
+                  <option value="local">ローカルファイルシステム</option>
+                  <option value="gcs">Google Cloud Storage</option>
+                  <option value="google_drive">Google Drive</option>
+                </select>
+                <p className="text-sm text-gray-600 mt-1">
+                  {storageType === 'local' && 'ローカルマシン上のフォルダに保存します。'}
+                  {storageType === 'gcs' && 'Google Cloud Storageのバケットに保存します。'}
+                  {storageType === 'google_drive' && 'Google Driveの共有フォルダに保存します（推奨）。'}
+                </p>
+              </div>
+
+              {storageType === 'google_drive' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Google Drive フォルダID <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-300 rounded-md p-3"
+                      value={googleDriveFolderId}
+                      onChange={(e) => setGoogleDriveFolderId(e.target.value)}
+                      placeholder="例: 1a2B3c4D5e6F7g8H9i0J"
+                    />
+                    <p className="text-sm text-gray-600 mt-1">
+                      Google Driveの共有フォルダのIDを入力してください。
+                      フォルダのURL「https://drive.google.com/drive/folders/<strong>フォルダID</strong>」から取得できます。
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      サービスアカウント認証情報のパス <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-300 rounded-md p-3"
+                      value={googleDriveCredentialsPath}
+                      onChange={(e) => setGoogleDriveCredentialsPath(e.target.value)}
+                      placeholder="例: /path/to/service-account-key.json"
+                    />
+                    <p className="text-sm text-gray-600 mt-1">
+                      Google Cloud ConsoleでダウンロードしたサービスアカウントのJSONキーファイルのパスを入力してください。
+                    </p>
+                  </div>
+
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <h4 className="font-semibold text-sm mb-2">📘 Google Drive APIの設定方法</h4>
+                    <ol className="text-sm space-y-2 list-decimal list-inside">
+                      <li>Google Cloud Consoleでプロジェクトを作成</li>
+                      <li>Google Drive APIを有効化</li>
+                      <li>サービスアカウントを作成してJSONキーをダウンロード</li>
+                      <li>共有フォルダにサービスアカウントのメールアドレスを編集者として追加</li>
+                      <li>フォルダIDとJSONキーのパスを上記に入力</li>
+                    </ol>
+                    <p className="text-xs text-gray-600 mt-3">
+                      詳しい手順は
+                      <a
+                        href="https://developers.google.com/drive/api/guides/about-sdk"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 underline ml-1"
+                      >
+                        Google Drive API ドキュメント
+                      </a>
+                      を参照してください。
+                    </p>
+                  </div>
+                </>
+              )}
+
+              <div className="border-t border-gray-300 pt-6 mt-6">
+                <h3 className="text-lg font-bold mb-4">フォルダ構成</h3>
+                <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
+                  <p className="text-sm mb-3">
+                    ノートは以下のフォルダ構成で管理されます：
+                  </p>
+                  <div className="font-mono text-sm space-y-1 bg-white border border-gray-200 rounded p-3">
+                    <div>📁 {storageType === 'google_drive' ? '共有フォルダ（指定したフォルダID）' : 'ルートフォルダ'}</div>
+                    <div className="ml-4">├── 📁 notes/</div>
+                    <div className="ml-8">│   ├── 📁 new/ <span className="text-gray-600">← 新規ノート（取り込み前）</span></div>
+                    <div className="ml-8">│   └── 📁 processed/ <span className="text-gray-600">← 取り込み済みノート</span></div>
+                    <div className="ml-4">└── 📄 master_dictionary.yaml <span className="text-gray-600">← 正規化辞書</span></div>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-3">
+                    ※ 新規ノートを <code>notes/new/</code> フォルダに配置すると、取り込み処理で自動的に <code>notes/processed/</code> に移動されます。
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 

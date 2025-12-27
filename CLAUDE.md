@@ -446,6 +446,306 @@ interface NewTermSuggestion {
 
 ---
 
+### 8. Google Drive連携とインテリジェントな単語抽出 ⭐⭐ (Phase 7)
+
+#### 概要
+複数人でノートを共有する場合、Google Driveの共有フォルダーにノートと辞書を保存し、インテリジェントな新出単語抽出と表記揺れ自動検出を行う。
+
+#### 8-1. Google Drive連携機能
+
+**目的**:
+- チーム内で実験ノートを共有
+- 全員が同じノートフォルダーにアクセス
+- 辞書ファイル（YAML）もGoogle Driveで一元管理
+
+**機能要件**:
+- **Google Drive API認証**
+  - サービスアカウント認証
+  - Google Drive APIを有効化
+  - ユーザーが共有フォルダーIDを設定画面で指定
+
+- **ストレージ層の拡張**
+  - `storage.py`に`GoogleDriveStorage`クラスを追加
+  - フォルダー構成:
+    ```
+    Google Drive共有フォルダー/
+    ├── notes/
+    │   ├── new/          ← 新規ノート
+    │   └── processed/    ← 取り込み済みノート
+    └── master_dictionary.yaml  ← 正規化辞書
+    ```
+
+- **設定画面に「ノート管理」タブ追加**
+  - ストレージタイプ選択: ローカル / Google Drive
+  - Google Drive設定:
+    - サービスアカウントキー（JSONファイル）のアップロード
+    - 共有フォルダーIDの入力
+    - 接続テスト機能
+  - ローカル設定:
+    - ノートフォルダーパス
+    - 辞書ファイルパス
+
+**データフロー**:
+1. ユーザーが新規ノートを`notes/new/`に配置（Google Drive上）
+2. UIから「取り込み実行」
+3. バックエンドがGoogle Drive APIでノートを読み込み
+4. ChromaDBに追加
+5. ノートを`notes/processed/`に移動
+6. 辞書が更新された場合、Google Drive上のYAMLファイルを更新
+
+**API設計**:
+```python
+# backend/storage.py
+class GoogleDriveStorage(StorageBackend):
+    def __init__(self, credentials_path: str, folder_id: str):
+        # Google Drive API認証
+        # folder_id: 共有フォルダーのID
+        pass
+
+    def list_files(self, prefix: str, pattern: str) -> List[str]:
+        # Google Drive上のファイル一覧を取得
+        pass
+
+    def read_file(self, path: str) -> str:
+        # ファイルをダウンロードして読み込み
+        pass
+
+    def write_file(self, path: str, content: str) -> None:
+        # ファイルをアップロード（既存ファイルは上書き）
+        pass
+```
+
+**セキュリティ**:
+- サービスアカウントキーはlocalStorageに暗号化して保存
+- Google Drive APIのスコープを最小限に制限（drive.file）
+
+---
+
+#### 8-2. インテリジェントな新出単語抽出
+
+**目的**:
+化学材料名を細切れにせず、複数のパターンで抽出することで検索精度を向上させる。
+
+**例**:
+```
+入力: "HbA1c捕捉抗体"
+↓
+抽出される単語パターン:
+1. "HbA1c捕捉抗体" (完全形)
+2. "HbA1c" (前半部分)
+3. "捕捉抗体" (後半部分)
+4. "抗体" (末尾キーワード)
+```
+
+**アルゴリズム**:
+```python
+def generate_term_patterns(term: str) -> List[str]:
+    """
+    複数パターンの単語を生成
+
+    ルール:
+    1. 完全形を必ず含める
+    2. 英数字と日本語の境界で分割
+    3. 日本語の名詞句を抽出
+    4. 化学接尾辞（〜酸、〜塩、〜抗体、など）を含む部分を抽出
+
+    Args:
+        term: 元の単語（例: "HbA1c捕捉抗体"）
+
+    Returns:
+        パターンのリスト（重複なし）
+    """
+    patterns = set()
+    patterns.add(term)  # 完全形
+
+    # 英数字と日本語の境界で分割
+    parts = re.split(r'([a-zA-Z0-9]+)', term)
+    for i, part in enumerate(parts):
+        if part:
+            patterns.add(part)
+            # 前後の組み合わせも追加
+            if i > 0 and parts[i-1]:
+                patterns.add(parts[i-1] + part)
+            if i < len(parts) - 1 and parts[i+1]:
+                patterns.add(part + parts[i+1])
+
+    # 化学接尾辞を含む部分を抽出
+    suffixes = ['酸', '塩', '抗体', '試薬', '溶媒', '液', 'エステル']
+    for suffix in suffixes:
+        if suffix in term:
+            idx = term.rindex(suffix)
+            patterns.add(term[:idx+len(suffix)])
+
+    return list(patterns)
+```
+
+**実装箇所**: `backend/term_extractor.py`の`extract_terms_from_text()`メソッドを拡張
+
+---
+
+#### 8-3. 表記揺れ辞書の自動生成
+
+**目的**:
+LLMを活用して、類似する単語を自動検出し、表記揺れ辞書を自動生成・更新する。
+
+**アルゴリズム**:
+1. **新出単語の収集**
+   - 全ノートから抽出された新出単語をプール
+
+2. **文字数フィルタリング**
+   - 文字数が±2文字以内の単語同士を比較対象にする
+   - 例: "エタノール"（5文字）→ "エチルアルコール"（8文字）は比較しない
+
+3. **LLMによる類似度判定**
+   - 編集距離（Levenshtein距離）
+   - Embedding類似度（OpenAI Embeddings）
+   - LLMによる意味的判定
+
+4. **表記揺れ候補の提案**
+   - 総合スコアが閾値（例: 0.7）を超える単語ペアを候補として提示
+   - ユーザーが承認/却下を判定
+
+5. **YAML辞書への自動反映**
+   - 承認された単語ペアを辞書に追加
+   - Google Drive上のYAMLファイルを自動更新
+
+**実装**:
+```python
+def auto_detect_variants(
+    all_terms: List[str],
+    llm: ChatOpenAI,
+    embeddings: OpenAIEmbeddings,
+    threshold: float = 0.7
+) -> List[Dict]:
+    """
+    表記揺れ候補を自動検出
+
+    Args:
+        all_terms: 全ての新出単語
+        llm: LLMインスタンス
+        embeddings: Embeddingモデル
+        threshold: 類似度の閾値
+
+    Returns:
+        表記揺れ候補のリスト
+        [
+            {
+                "term1": "エタノール",
+                "term2": "エチルアルコール",
+                "similarity": 0.85,
+                "llm_suggestion": "同じ物質（表記揺れ）",
+                "recommended_canonical": "エタノール"
+            },
+            ...
+        ]
+    """
+    candidates = []
+
+    # 文字数でグルーピング
+    term_groups = defaultdict(list)
+    for term in all_terms:
+        length = len(term)
+        term_groups[length].append(term)
+
+    # 文字数が近い単語同士を比較
+    for length, terms in term_groups.items():
+        # ±2文字以内のグループも含める
+        nearby_terms = []
+        for l in range(max(1, length-2), length+3):
+            nearby_terms.extend(term_groups.get(l, []))
+
+        # ペアごとに類似度計算
+        for i, term1 in enumerate(terms):
+            for term2 in nearby_terms[i+1:]:
+                # 編集距離
+                edit_sim = calculate_edit_distance_similarity(term1, term2)
+                # Embedding類似度
+                emb_sim = calculate_embedding_similarity(term1, term2)
+                # 総合スコア
+                combined = (edit_sim + emb_sim) / 2
+
+                if combined >= threshold:
+                    # LLMで最終判定
+                    llm_result = llm_judge_variant(term1, term2, llm)
+                    candidates.append({
+                        "term1": term1,
+                        "term2": term2,
+                        "similarity": combined,
+                        "llm_suggestion": llm_result["suggestion"],
+                        "recommended_canonical": llm_result["canonical"]
+                    })
+
+    return candidates
+```
+
+**UI設計**:
+- ノート管理画面に「表記揺れ自動検出」ボタン
+- 検出された候補をテーブル表示:
+  - カラム: 単語1 | 単語2 | 類似度 | LLM判定 | 推奨正規化名 | 承認/却下
+- 一括承認/却下ボタン
+- 承認後、自動でYAML辞書を更新
+
+---
+
+#### 8-4. 統合ワークフロー
+
+```
+[新規ノート作成] → [Google Drive: notes/new/]
+                          ↓
+                    [UI: 取り込み実行]
+                          ↓
+          [バックエンド: 材料セクション抽出]
+                          ↓
+            [インテリジェント単語抽出]
+            (複数パターン生成)
+                          ↓
+          [既存辞書と照合 (Google Drive)]
+                          ↓
+              [新出単語をプール]
+                          ↓
+          [LLMによる表記揺れ検出]
+          (文字数が近い単語同士を比較)
+                          ↓
+            [UI: 表記揺れ候補表示]
+                          ↓
+          [ユーザー: 承認/却下判定]
+                          ↓
+        [YAML辞書を自動更新 (Google Drive)]
+                          ↓
+          [ChromaDBにノートを追加]
+                          ↓
+    [Google Drive: notes/processed/に移動]
+```
+
+---
+
+#### 8-5. 技術要件
+
+**必要なライブラリ**:
+```python
+# backend/requirements.txt に追加
+google-api-python-client==2.x
+google-auth==2.x
+google-auth-httplib2==0.x
+google-auth-oauthlib==1.x
+```
+
+**Google Cloud Console設定**:
+1. Google Drive APIを有効化
+2. サービスアカウントを作成
+3. サービスアカウントキー（JSON）をダウンロード
+4. 共有フォルダーにサービスアカウントのメールアドレスを招待（編集権限）
+
+**環境変数**:
+```bash
+# .env（オプション、設定画面でも設定可能）
+GOOGLE_DRIVE_CREDENTIALS_PATH=/path/to/service-account-key.json
+GOOGLE_DRIVE_FOLDER_ID=1abc...xyz
+STORAGE_TYPE=google_drive  # or "local"
+```
+
+---
+
 ## システムアーキテクチャ
 
 ### 全体構成図 ⭐
