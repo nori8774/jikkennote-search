@@ -243,4 +243,127 @@ export const api = {
 
     return response.json();
   },
+
+  // === Prompt Management APIs ===
+
+  /**
+   * 保存されているプロンプトの一覧を取得
+   */
+  async listSavedPrompts() {
+    const response = await fetch(`${API_BASE_URL}/prompts/list`);
+
+    if (!response.ok) {
+      throw new Error(`List prompts failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * プロンプトをYAMLファイルとして保存
+   */
+  async savePrompt(name: string, prompts: Record<string, string>, description?: string) {
+    const response = await fetch(`${API_BASE_URL}/prompts/save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name,
+        prompts,
+        description: description || ''
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Save prompt failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * プロンプトをYAMLファイルから読み込み
+   */
+  async loadPrompt(name: string) {
+    const response = await fetch(`${API_BASE_URL}/prompts/load/${encodeURIComponent(name)}`);
+
+    if (!response.ok) {
+      throw new Error(`Load prompt failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * プロンプトを削除
+   */
+  async deletePrompt(name: string) {
+    const response = await fetch(`${API_BASE_URL}/prompts/delete/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Delete prompt failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * プロンプトを更新
+   */
+  async updatePrompt(name: string, prompts?: Record<string, string>, description?: string) {
+    const response = await fetch(`${API_BASE_URL}/prompts/update`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name,
+        prompts,
+        description
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Update prompt failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // === ChromaDB Management APIs ===
+
+  /**
+   * ChromaDBの現在のembeddingモデル情報を取得
+   */
+  async getChromaInfo() {
+    const response = await fetch(`${API_BASE_URL}/chroma/info`);
+
+    if (!response.ok) {
+      throw new Error(`Get ChromaDB info failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * ChromaDBを完全にリセット
+   */
+  async resetChromaDB() {
+    const response = await fetch(`${API_BASE_URL}/chroma/reset`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Reset ChromaDB failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
 };

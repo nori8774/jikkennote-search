@@ -102,7 +102,7 @@ def ingest_notes(
 
     # ChromaDBの初期化（GCS同期付き）
     embeddings = OpenAIEmbeddings(model=embedding_model, api_key=api_key)
-    vectorstore = get_chroma_vectorstore(embeddings)
+    vectorstore = get_chroma_vectorstore(embeddings, embedding_model=embedding_model)
 
     # 既存データの確認（増分更新のため）
     existing_ids = get_existing_ids(vectorstore)

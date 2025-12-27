@@ -5,7 +5,6 @@ import Button from '@/components/Button';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import * as XLSX from 'xlsx';
-import { getSavedPrompts } from '@/lib/promptStorage';
 
 interface TestCondition {
   条件: number;
@@ -83,8 +82,12 @@ export default function EvaluatePage() {
     setLlmModel(storage.getLLMModel() || 'gpt-4o-mini');
     setCustomPrompts(storage.getCustomPrompts() || {});
 
-    // 保存済みプロンプト一覧を読み込む
-    setSavedPromptsList(getSavedPrompts());
+    // 保存済みプロンプト一覧をバックエンドから読み込む
+    api.listSavedPrompts().then((res) => {
+      if (res.success) {
+        setSavedPromptsList(res.prompts || []);
+      }
+    }).catch(console.error);
   }, []);
 
   const loadEvaluationData = async () => {
@@ -441,6 +444,35 @@ export default function EvaluatePage() {
       setCustomPrompts({});
     }
   };
+
+  // プロンプト名が変更されたときに保存済みプロンプトをロードする
+  useEffect(() => {
+    const loadSelectedPrompt = async () => {
+      // デフォルトやカスタムの場合はロードしない
+      if (promptName === 'デフォルト' || promptName === 'カスタム' || !promptName) {
+        return;
+      }
+
+      // 保存済みプロンプトリストに存在するか確認
+      const savedPrompt = savedPromptsList.find(p => p.name === promptName);
+      if (!savedPrompt) {
+        return;
+      }
+
+      try {
+        // バックエンドからプロンプトをロード
+        const result = await api.loadPrompt(savedPrompt.id);
+        if (result.success && result.prompts) {
+          setCustomPrompts(result.prompts);
+          console.log(`プロンプト「${promptName}」をロードしました`);
+        }
+      } catch (error) {
+        console.error(`プロンプト「${promptName}」のロードに失敗:`, error);
+      }
+    };
+
+    loadSelectedPrompt();
+  }, [promptName, savedPromptsList]);
 
   return (
     <div className="min-h-screen bg-background">

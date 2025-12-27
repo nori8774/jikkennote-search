@@ -1,17 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
-import {
-  getSavedPrompts,
-  savePrompt,
-  deletePrompt,
-  getRemainingSlots,
-  getPromptById
-} from '@/lib/promptStorage';
-import { SavedPrompt } from '@/lib/types';
+
+interface SavedPrompt {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export default function SettingsPage() {
   const [openaiKey, setOpenaiKey] = useState('');
@@ -30,24 +30,77 @@ export default function SettingsPage() {
   const [savePromptDescription, setSavePromptDescription] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  // ChromaDB管理用のステート
+  const [chromaDBInfo, setChromaDBInfo] = useState<{
+    current_embedding_model: string | null;
+    created_at: string | null;
+    last_updated: string | null;
+  } | null>(null);
+  const [originalEmbeddingModel, setOriginalEmbeddingModel] = useState<string>('');
+
+  // 保存ボタンクリック時のEmbeddingモデルの値を保持（キャンセル時の復元用）
+  const embeddingModelBeforeSave = useRef<string>('');
+
   useEffect(() => {
     // localStorageから設定を読み込む
     setOpenaiKey(storage.getOpenAIApiKey() || '');
     setCohereKey(storage.getCohereApiKey() || '');
-    setEmbeddingModel(storage.getEmbeddingModel() || 'text-embedding-3-small');
+    const storedEmbeddingModel = storage.getEmbeddingModel() || 'text-embedding-3-small';
+    setEmbeddingModel(storedEmbeddingModel);
+    setOriginalEmbeddingModel(storedEmbeddingModel);
     setLlmModel(storage.getLLMModel() || 'gpt-4o-mini');
     setCustomPrompts(storage.getCustomPrompts() || {});
 
-    // 保存済みプロンプト一覧を読み込む
-    setSavedPromptsList(getSavedPrompts());
+    // 保存済みプロンプト一覧をバックエンドから読み込む
+    api.listSavedPrompts().then((res) => {
+      if (res.success) {
+        setSavedPromptsList(res.prompts || []);
+      }
+    }).catch(console.error);
 
     // デフォルトプロンプトを取得
     api.getDefaultPrompts().then((res) => {
       setDefaultPrompts(res.prompts);
     }).catch(console.error);
+
+    // ChromaDB情報を取得
+    api.getChromaInfo().then((res) => {
+      if (res.success) {
+        setChromaDBInfo({
+          current_embedding_model: res.current_embedding_model,
+          created_at: res.created_at,
+          last_updated: res.last_updated
+        });
+      }
+    }).catch(console.error);
   }, []);
 
   const handleSave = () => {
+    // 保存前のEmbeddingモデルの値を保存（localStorageから取得）
+    const savedEmbeddingModel = storage.getEmbeddingModel();
+    embeddingModelBeforeSave.current = savedEmbeddingModel || embeddingModel;
+
+    // Embeddingモデルが変更されているかチェック
+    // 優先順位: 1) ChromaDBの現在のモデル、2) localStorageの値
+    const currentModel = chromaDBInfo?.current_embedding_model || savedEmbeddingModel;
+    const isModelChanged = currentModel && embeddingModel !== currentModel;
+
+    // Embeddingモデルが変更されている場合、警告を表示
+    if (isModelChanged) {
+      const confirmMessage = `⚠️ 警告: Embeddingモデルを変更しようとしています\n\n` +
+        `現在のモデル: ${currentModel}\n` +
+        `変更後: ${embeddingModel}\n\n` +
+        `Embeddingモデルを変更すると、既存のベクトルDBとの互換性がなくなります。\n` +
+        `検索が正しく動作しなくなるため、ChromaDBをリセットして全ノートを再取り込みする必要があります。\n\n` +
+        `本当に変更しますか？`;
+
+      if (!confirm(confirmMessage)) {
+        // キャンセルされた場合、保存前の値に戻す
+        setEmbeddingModel(embeddingModelBeforeSave.current);
+        return;
+      }
+    }
+
     storage.setOpenAIApiKey(openaiKey);
     storage.setCohereApiKey(cohereKey);
     storage.setEmbeddingModel(embeddingModel);
@@ -56,6 +109,37 @@ export default function SettingsPage() {
 
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleResetChromaDB = async () => {
+    const confirmMessage = `⚠️ 危険な操作: ChromaDBを完全にリセットします\n\n` +
+      `この操作により、以下のデータが削除されます：\n` +
+      `- 全ての実験ノートのベクトルデータ\n` +
+      `- 検索インデックス\n\n` +
+      `リセット後は、全ての実験ノートを再度取り込む必要があります。\n\n` +
+      `本当にリセットしますか？`;
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      const result = await api.resetChromaDB();
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        // ChromaDB情報を再読み込み
+        const info = await api.getChromaInfo();
+        if (info.success) {
+          setChromaDBInfo({
+            current_embedding_model: info.current_embedding_model,
+            created_at: info.created_at,
+            last_updated: info.last_updated
+          });
+        }
+      }
+    } catch (error) {
+      alert(`❌ ChromaDBリセットエラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    }
   };
 
   const handleResetPrompt = (promptType: string) => {
@@ -80,55 +164,74 @@ export default function SettingsPage() {
     setShowSaveDialog(true);
   };
 
-  const handleSavePromptSet = () => {
+  const handleSavePromptSet = async () => {
     if (!savePromptName.trim()) {
       setSaveError('プロンプト名を入力してください。');
       return;
     }
 
-    // 現在のプロンプトを保存
-    const promptsToSave = {
-      query_generation: customPrompts['query_generation'] || defaultPrompts?.query_generation?.prompt || '',
-      compare: customPrompts['compare'] || defaultPrompts?.compare?.prompt || ''
-    };
+    try {
+      // 現在のプロンプトを保存
+      const promptsToSave = {
+        query_generation: customPrompts['query_generation'] || defaultPrompts?.query_generation?.prompt || '',
+        compare: customPrompts['compare'] || defaultPrompts?.compare?.prompt || ''
+      };
 
-    const result = savePrompt(savePromptName, promptsToSave, savePromptDescription);
+      const result = await api.savePrompt(savePromptName, promptsToSave, savePromptDescription);
 
-    if (!result.success) {
-      setSaveError(result.error || '保存に失敗しました。');
-      return;
-    }
+      if (!result.success) {
+        setSaveError(result.error || '保存に失敗しました。');
+        return;
+      }
 
-    // 保存成功
-    setSavedPromptsList(getSavedPrompts());
-    setShowSaveDialog(false);
-    alert(`プロンプト「${savePromptName}」を保存しました。`);
-  };
-
-  const handleRestorePrompt = (id: string) => {
-    const prompt = getPromptById(id);
-    if (!prompt) {
-      alert('プロンプトが見つかりません。');
-      return;
-    }
-
-    if (confirm(`プロンプト「${prompt.name}」を復元しますか？現在の編集内容は上書きされます。`)) {
-      setCustomPrompts({
-        query_generation: prompt.prompts.query_generation,
-        compare: prompt.prompts.compare
-      });
-      alert(`プロンプト「${prompt.name}」を復元しました。「設定を保存」ボタンをクリックして適用してください。`);
+      // 保存成功 - リストを再読み込み
+      const listRes = await api.listSavedPrompts();
+      if (listRes.success) {
+        setSavedPromptsList(listRes.prompts || []);
+      }
+      setShowSaveDialog(false);
+      alert(`プロンプト「${savePromptName}」を保存しました。`);
+    } catch (error) {
+      setSaveError(`保存エラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
     }
   };
 
-  const handleDeleteSavedPrompt = (id: string, name: string) => {
+  const handleRestorePrompt = async (id: string) => {
+    try {
+      const result = await api.loadPrompt(id);
+      if (!result.success || !result.prompts) {
+        alert('プロンプトが見つかりません。');
+        return;
+      }
+
+      if (confirm(`プロンプト「${result.name}」を復元しますか？現在の編集内容は上書きされます。`)) {
+        setCustomPrompts({
+          query_generation: result.prompts.query_generation || '',
+          compare: result.prompts.compare || ''
+        });
+        alert(`プロンプト「${result.name}」を復元しました。「設定を保存」ボタンをクリックして適用してください。`);
+      }
+    } catch (error) {
+      alert(`復元エラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    }
+  };
+
+  const handleDeleteSavedPrompt = async (id: string, name: string) => {
     if (confirm(`プロンプト「${name}」を削除しますか？この操作は元に戻せません。`)) {
-      const result = deletePrompt(id);
-      if (result.success) {
-        setSavedPromptsList(getSavedPrompts());
-        alert('削除しました。');
-      } else {
-        alert(result.error || '削除に失敗しました。');
+      try {
+        const result = await api.deletePrompt(id);
+        if (result.success) {
+          // リストを再読み込み
+          const listRes = await api.listSavedPrompts();
+          if (listRes.success) {
+            setSavedPromptsList(listRes.prompts || []);
+          }
+          alert('削除しました。');
+        } else {
+          alert(result.error || '削除に失敗しました。');
+        }
+      } catch (error) {
+        alert(`削除エラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
       }
     }
   };
@@ -277,6 +380,75 @@ export default function SettingsPage() {
                   クエリ生成と比較分析に使用されます。gpt-4o-mini が推奨です。
                 </p>
               </div>
+
+              {/* ChromaDB管理 */}
+              <div className="border-t border-gray-300 pt-6 mt-6">
+                <h3 className="text-lg font-bold mb-4">ChromaDB管理</h3>
+
+                {/* ChromaDB情報 */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <h4 className="font-semibold text-sm mb-2">現在のChromaDB設定</h4>
+                  {chromaDBInfo ? (
+                    <div className="space-y-1 text-sm">
+                      <p>
+                        <span className="font-medium">Embeddingモデル:</span>{' '}
+                        <span className="font-mono">
+                          {chromaDBInfo.current_embedding_model || 'まだ設定されていません'}
+                        </span>
+                      </p>
+                      {chromaDBInfo.created_at && (
+                        <p>
+                          <span className="font-medium">作成日時:</span>{' '}
+                          {new Date(chromaDBInfo.created_at).toLocaleString('ja-JP')}
+                        </p>
+                      )}
+                      {chromaDBInfo.last_updated && (
+                        <p>
+                          <span className="font-medium">最終更新:</span>{' '}
+                          {new Date(chromaDBInfo.last_updated).toLocaleString('ja-JP')}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-600">読み込み中...</p>
+                  )}
+                </div>
+
+                {/* Embedding変更警告 */}
+                {(() => {
+                  const currentModel = chromaDBInfo?.current_embedding_model || storage.getEmbeddingModel();
+                  const isChanged = currentModel && embeddingModel !== currentModel;
+                  return isChanged && (
+                    <div className="bg-warning/10 border-2 border-warning rounded-lg p-4 mb-4">
+                      <h4 className="font-bold text-warning mb-2">⚠️ 警告</h4>
+                      <p className="text-sm mb-2">
+                        Embeddingモデルを <span className="font-mono">{currentModel}</span> から{' '}
+                        <span className="font-mono">{embeddingModel}</span> に変更しようとしています。
+                      </p>
+                      <p className="text-sm text-gray-700">
+                        Embeddingモデルを変更すると、既存のベクトルDBとの互換性がなくなります。
+                        変更後は、ChromaDBをリセットして全ての実験ノートを再度取り込む必要があります。
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                {/* ChromaDBリセットボタン */}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-sm text-red-800 mb-2">危険な操作</h4>
+                  <p className="text-sm text-gray-700 mb-3">
+                    ChromaDBをリセットすると、全てのベクトルデータが削除されます。
+                    Embeddingモデルを変更した場合のみ実行してください。
+                  </p>
+                  <Button
+                    variant="danger"
+                    onClick={handleResetChromaDB}
+                    className="text-sm"
+                  >
+                    ChromaDBをリセット
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -315,7 +487,7 @@ export default function SettingsPage() {
                             </p>
                           )}
                           <p className="text-xs text-gray-500 mt-1">
-                            更新日: {new Date(prompt.updatedAt).toLocaleString('ja-JP')}
+                            更新日: {new Date(prompt.updated_at).toLocaleString('ja-JP')}
                           </p>
                         </div>
                         <div className="flex gap-2 ml-4">
@@ -336,7 +508,7 @@ export default function SettingsPage() {
                     ))}
                   </div>
                   <p className="text-xs text-gray-600 mt-3">
-                    残り保存可能数: {getRemainingSlots()}個
+                    残り保存可能数: {50 - savedPromptsList.length}個
                   </p>
                 </div>
               )}

@@ -20,6 +20,7 @@ from term_extractor import TermExtractor
 from history import get_history_manager
 from evaluation import get_evaluator
 from storage import storage
+from prompt_manager import PromptManager
 
 app = FastAPI(
     title="実験ノート検索システム API",
@@ -844,6 +845,188 @@ async def batch_evaluate_rag(request: BatchEvaluateRequest):
     except Exception as e:
         print(f"Error in batch_evaluate: {str(e)}")
         raise HTTPException(status_code=500, detail=f"バッチ評価エラー: {str(e)}")
+
+
+# === Prompt Management Endpoints ===
+
+# PromptManagerインスタンス
+prompt_manager = PromptManager()
+
+
+class SavePromptRequest(BaseModel):
+    name: str
+    prompts: Dict[str, str]
+    description: Optional[str] = ""
+
+
+class UpdatePromptRequest(BaseModel):
+    name: str
+    prompts: Optional[Dict[str, str]] = None
+    description: Optional[str] = None
+
+
+@app.get("/prompts/list")
+async def list_prompts():
+    """保存されているプロンプトの一覧を取得"""
+    try:
+        prompts = prompt_manager.list_prompts()
+        return {
+            "success": True,
+            "prompts": prompts,
+            "count": len(prompts)
+        }
+    except Exception as e:
+        print(f"Error in list_prompts: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロンプト一覧取得エラー: {str(e)}")
+
+
+@app.post("/prompts/save")
+async def save_prompt(request: SavePromptRequest):
+    """プロンプトをYAMLファイルとして保存"""
+    try:
+        result = prompt_manager.save_prompt(
+            name=request.name,
+            prompts=request.prompts,
+            description=request.description
+        )
+
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result.get("error", "保存に失敗しました"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in save_prompt: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロンプト保存エラー: {str(e)}")
+
+
+@app.get("/prompts/load/{name}")
+async def load_prompt(name: str):
+    """プロンプトをYAMLファイルから読み込み"""
+    try:
+        data = prompt_manager.load_prompt(name)
+
+        if not data:
+            raise HTTPException(status_code=404, detail="プロンプトが見つかりません")
+
+        return {
+            "success": True,
+            "prompt": data
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in load_prompt: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロンプト読み込みエラー: {str(e)}")
+
+
+@app.delete("/prompts/delete/{name}")
+async def delete_prompt(name: str):
+    """プロンプトを削除"""
+    try:
+        result = prompt_manager.delete_prompt(name)
+
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result.get("error", "削除に失敗しました"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in delete_prompt: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロンプト削除エラー: {str(e)}")
+
+
+@app.put("/prompts/update")
+async def update_prompt(request: UpdatePromptRequest):
+    """プロンプトを更新"""
+    try:
+        result = prompt_manager.update_prompt(
+            name=request.name,
+            prompts=request.prompts,
+            description=request.description
+        )
+
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result.get("error", "更新に失敗しました"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_prompt: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロンプト更新エラー: {str(e)}")
+
+
+# === ChromaDB Management Endpoints ===
+
+class ChromaDBInfoResponse(BaseModel):
+    success: bool
+    current_embedding_model: Optional[str]
+    created_at: Optional[str]
+    last_updated: Optional[str]
+
+
+class ChromaDBResetResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@app.get("/chroma/info", response_model=ChromaDBInfoResponse)
+async def get_chroma_info():
+    """ChromaDBの現在のembeddingモデル情報を取得"""
+    try:
+        from chroma_sync import get_current_embedding_model, get_chroma_config_path
+        import json
+
+        current_model = get_current_embedding_model()
+        config_path = get_chroma_config_path()
+
+        created_at = None
+        last_updated = None
+
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+                created_at = config_data.get('created_at')
+                last_updated = config_data.get('last_updated')
+
+        return ChromaDBInfoResponse(
+            success=True,
+            current_embedding_model=current_model,
+            created_at=created_at,
+            last_updated=last_updated
+        )
+
+    except Exception as e:
+        print(f"Error in get_chroma_info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ChromaDB情報取得エラー: {str(e)}")
+
+
+@app.post("/chroma/reset", response_model=ChromaDBResetResponse)
+async def reset_chroma_db_endpoint():
+    """ChromaDBを完全にリセット"""
+    try:
+        from chroma_sync import reset_chroma_db
+
+        success = reset_chroma_db()
+
+        if success:
+            return ChromaDBResetResponse(
+                success=True,
+                message="ChromaDBをリセットしました。新しいノートを取り込んでデータベースを再構築してください。"
+            )
+        else:
+            raise HTTPException(status_code=500, detail="ChromaDBのリセットに失敗しました")
+
+    except Exception as e:
+        print(f"Error in reset_chroma_db: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ChromaDBリセットエラー: {str(e)}")
 
 
 if __name__ == "__main__":
