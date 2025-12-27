@@ -204,7 +204,24 @@ export default function IngestPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-8">
-        <h1 className="text-3xl font-bold mb-8">ノート取り込み</h1>
+        <h1 className="text-3xl font-bold mb-4">ノート取り込み</h1>
+
+        {/* 本番環境の説明 */}
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-8">
+          <h3 className="font-bold mb-2 text-green-900">📦 本番環境のストレージ設定</h3>
+          <p className="text-sm text-green-800 mb-2">
+            バックエンドは <strong>Google Cloud Storage (GCS)</strong> を使用しています。
+          </p>
+          <div className="text-xs font-mono text-green-900 bg-white p-3 rounded border border-green-200">
+            バケット: jikkennote-storage<br />
+            新規ノート: gs://jikkennote-storage/notes/new/<br />
+            処理済み: gs://jikkennote-storage/notes/processed/<br />
+            アーカイブ: gs://jikkennote-storage/notes/archived/
+          </div>
+          <p className="text-xs text-green-700 mt-2">
+            ※ フォルダパスはバックエンドで固定されており、変更できません。
+          </p>
+        </div>
 
         {/* ChromaDB再構築セクション */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg shadow-lg p-6 mb-8">
@@ -225,17 +242,17 @@ export default function IngestPage() {
             {/* ソースフォルダ */}
             <div>
               <label className="block text-sm font-medium mb-2">
-                ソースフォルダ（空欄の場合はデフォルト: notes/new）
+                ソースフォルダ
               </label>
               <input
                 type="text"
-                className="w-full border border-gray-300 rounded-md p-3"
-                value={sourceFolder}
-                onChange={(e) => setSourceFolder(e.target.value)}
-                placeholder="notes/new"
+                className="w-full border border-gray-300 rounded-md p-3 bg-gray-100 cursor-not-allowed"
+                value="notes/new (GCS: gs://jikkennote-storage/notes/new/)"
+                readOnly
+                disabled
               />
               <p className="text-sm text-text-secondary mt-1">
-                取り込む新規ノートが保存されているフォルダ
+                ※ 本番環境ではバックエンドで固定されています。変更できません。
               </p>
             </div>
 

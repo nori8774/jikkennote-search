@@ -595,10 +595,34 @@ export default function SettingsPage() {
           {/* ノート管理タブ */}
           {activeTab === 'notes' && (
             <div className="space-y-6">
+              {/* 本番環境の警告 */}
+              <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-6">
+                <h3 className="font-bold mb-2 text-yellow-900">⚠️ 本番環境について</h3>
+                <p className="text-sm text-yellow-800 mb-2">
+                  現在、バックエンドは <strong>Google Cloud Storage (GCS)</strong> で動作しています。
+                </p>
+                <p className="text-sm text-yellow-800">
+                  下記の設定はブラウザに保存されますが、<strong>バックエンドのストレージ設定には影響しません</strong>。
+                  バックエンドのストレージタイプとフォルダパスは環境変数で管理されています。
+                </p>
+                <div className="mt-3 p-3 bg-white rounded border border-yellow-200">
+                  <p className="text-xs font-mono text-gray-700">
+                    <strong>バックエンド設定:</strong><br />
+                    ストレージ: GCS (jikkennote-storage)<br />
+                    新規ノート: notes/new<br />
+                    処理済み: notes/processed<br />
+                    アーカイブ: notes/archived
+                  </p>
+                </div>
+              </div>
+
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                <h3 className="font-bold mb-2">ノートストレージの設定</h3>
+                <h3 className="font-bold mb-2">ノートストレージの設定（参考）</h3>
                 <p className="text-sm text-gray-700">
                   実験ノートの保存先を設定します。Google Driveを使用すると、チーム全体でノートを共有できます。
+                </p>
+                <p className="text-xs text-gray-500 mt-2">
+                  ※ 本番環境ではバックエンドの環境変数が優先されます。
                 </p>
               </div>
 
