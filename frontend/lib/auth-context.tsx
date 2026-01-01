@@ -3,7 +3,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   User,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   GoogleAuthProvider
@@ -97,6 +98,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 認証状態の監視
   useEffect(() => {
+    // リダイレクト結果を処理
+    getRedirectResult(auth).catch((error) => {
+      console.error('Redirect result error:', error);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
 
@@ -143,8 +149,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
-      // onAuthStateChangedで自動的に処理される
+      await signInWithRedirect(auth, provider);
+      // リダイレクト後、getRedirectResultとonAuthStateChangedで自動的に処理される
     } catch (error) {
       console.error('Login error:', error);
       throw error;

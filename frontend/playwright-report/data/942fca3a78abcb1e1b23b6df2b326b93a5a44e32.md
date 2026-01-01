@@ -1,0 +1,88 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e4]:
+      - link "実験ノート検索システム" [ref=e5] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e6]:
+        - link "検索" [ref=e7] [cursor=pointer]:
+          - /url: /search
+        - link "ビューワー" [ref=e8] [cursor=pointer]:
+          - /url: /viewer
+        - link "ノート管理" [ref=e9] [cursor=pointer]:
+          - /url: /ingest
+        - link "辞書管理" [ref=e10] [cursor=pointer]:
+          - /url: /dictionary
+        - link "チーム管理" [ref=e11] [cursor=pointer]:
+          - /url: /teams
+        - link "設定" [ref=e12] [cursor=pointer]:
+          - /url: /settings
+        - link "ログイン" [ref=e13] [cursor=pointer]:
+          - /url: /login
+  - generic [ref=e15]:
+    - heading "性能評価" [level=1] [ref=e16]
+    - generic [ref=e17]:
+      - heading "評価条件" [level=2] [ref=e18]
+      - generic [ref=e19]:
+        - heading "評価データファイル" [level=3] [ref=e20]
+        - paragraph [ref=e21]:
+          - text: Excel ファイル（.xlsx）をアップロードして評価データを読み込みます。
+          - text: "現在の評価条件数: 8 件"
+        - generic [ref=e22]:
+          - button "Choose File" [ref=e23] [cursor=pointer]
+          - button "JSONデータ読込" [ref=e24] [cursor=pointer]
+        - paragraph [ref=e25]: ※ Excel ファイルには「条件」「目的」「材料」「実験手順」「重点指示」「ranking_1〜16」のカラムが必要です
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]: Embedding モデル
+          - combobox [ref=e29]:
+            - option "text-embedding-3-small" [selected]
+            - option "text-embedding-3-large"
+            - option "text-embedding-ada-002"
+        - generic [ref=e30]:
+          - generic [ref=e31]: LLM モデル
+          - combobox [ref=e32]:
+            - option "gpt-4o-mini" [selected]
+            - option "gpt-4o"
+            - option "gpt-4-turbo"
+            - option "gpt-3.5-turbo"
+      - generic [ref=e34]:
+        - generic [ref=e35]:
+          - heading "プロンプト設定" [level=3] [ref=e36]
+          - paragraph [ref=e37]: デフォルト
+        - button "プロンプト編集を閉じる" [active] [ref=e38] [cursor=pointer]
+      - generic [ref=e39]:
+        - heading "プロンプト名" [level=3] [ref=e40]
+        - paragraph [ref=e41]: 評価履歴に記録するプロンプト名を選択または入力してください。
+        - combobox [ref=e43]:
+          - option "デフォルト" [selected]
+          - option "カスタム（手動入力）"
+      - generic [ref=e44]:
+        - button "全条件を評価" [ref=e45] [cursor=pointer]
+        - paragraph [ref=e46]: 8件の条件について検索・評価を実行します
+    - generic [ref=e47]:
+      - generic [ref=e48]:
+        - heading "評価履歴（最新5件）" [level=2] [ref=e49]
+        - generic [ref=e50]:
+          - button "🔍 データ確認" [ref=e51] [cursor=pointer]
+          - button "🗑️ 履歴削除" [ref=e52] [cursor=pointer]
+      - generic [ref=e53]:
+        - paragraph [ref=e54]: 評価履歴がありません
+        - paragraph [ref=e55]: 「全条件を評価」ボタンをクリックして評価を実行すると、ここに履歴が表示されます。
+  - generic [ref=e60] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e61]:
+      - img [ref=e62]
+    - generic [ref=e65]:
+      - button "Open issues overlay" [ref=e66]:
+        - generic [ref=e67]:
+          - generic [ref=e68]: "1"
+          - generic [ref=e69]: "2"
+        - generic [ref=e70]:
+          - text: Issue
+          - generic [ref=e71]: s
+      - button "Collapse issues badge" [ref=e72]:
+        - img [ref=e73]
+  - alert [ref=e75]
+```

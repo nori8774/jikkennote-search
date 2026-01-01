@@ -1,0 +1,46 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e4]:
+      - link "実験ノート検索システム" [ref=e5] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e6]:
+        - link "検索" [ref=e7] [cursor=pointer]:
+          - /url: /search
+        - link "ビューワー" [ref=e8] [cursor=pointer]:
+          - /url: /viewer
+        - link "ノート管理" [ref=e9] [cursor=pointer]:
+          - /url: /ingest
+        - link "辞書管理" [ref=e10] [cursor=pointer]:
+          - /url: /dictionary
+        - link "チーム管理" [ref=e11] [cursor=pointer]:
+          - /url: /teams
+        - link "設定" [ref=e12] [cursor=pointer]:
+          - /url: /settings
+        - link "ログイン" [ref=e13] [cursor=pointer]:
+          - /url: /login
+  - generic [ref=e15]:
+    - heading "設定" [level=1] [ref=e16]
+    - generic [ref=e18]:
+      - button "APIキー" [ref=e19] [cursor=pointer]
+      - button "モデル選択" [ref=e20] [cursor=pointer]
+      - button "プロンプト管理" [active] [ref=e21] [cursor=pointer]
+      - button "ノート管理" [ref=e22] [cursor=pointer]
+    - button "設定を保存" [ref=e25] [cursor=pointer]
+  - generic [ref=e30] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e31]:
+      - img [ref=e32]
+    - generic [ref=e35]:
+      - button "Open issues overlay" [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e38]: "1"
+          - generic [ref=e39]: "2"
+        - generic [ref=e40]:
+          - text: Issue
+          - generic [ref=e41]: s
+      - button "Collapse issues badge" [ref=e42]:
+        - img [ref=e43]
+  - alert [ref=e45]
+```

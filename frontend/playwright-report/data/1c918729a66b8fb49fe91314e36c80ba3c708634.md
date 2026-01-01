@@ -1,0 +1,74 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e4]:
+      - link "実験ノート検索システム" [ref=e5] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e6]:
+        - link "検索" [ref=e7] [cursor=pointer]:
+          - /url: /search
+        - link "ビューワー" [ref=e8] [cursor=pointer]:
+          - /url: /viewer
+        - link "ノート管理" [ref=e9] [cursor=pointer]:
+          - /url: /ingest
+        - link "辞書管理" [ref=e10] [cursor=pointer]:
+          - /url: /dictionary
+        - link "チーム管理" [ref=e11] [cursor=pointer]:
+          - /url: /teams
+        - link "設定" [ref=e12] [cursor=pointer]:
+          - /url: /settings
+        - link "ログイン" [ref=e13] [cursor=pointer]:
+          - /url: /login
+  - generic [ref=e15]:
+    - heading "設定" [level=1] [ref=e16]
+    - generic [ref=e18]:
+      - button "APIキー" [ref=e19] [cursor=pointer]
+      - button "モデル選択" [ref=e20] [cursor=pointer]
+      - button "プロンプト管理" [ref=e21] [cursor=pointer]
+      - button "ノート管理" [ref=e22] [cursor=pointer]
+    - generic [ref=e23]:
+      - generic [ref=e24]:
+        - generic [ref=e25]:
+          - generic [ref=e26]: Embeddingモデル
+          - combobox [ref=e27]:
+            - option "text-embedding-3-small"
+            - option "text-embedding-3-large" [selected]
+            - option "text-embedding-ada-002"
+          - paragraph [ref=e28]: ベクトル検索に使用されます。text-embedding-3-small が推奨です。
+        - generic [ref=e29]:
+          - generic [ref=e30]: LLMモデル
+          - combobox [ref=e31]:
+            - option "gpt-4o-mini" [selected]
+            - option "gpt-4o"
+            - option "gpt-4-turbo"
+            - option "gpt-3.5-turbo"
+          - paragraph [ref=e32]: クエリ生成と比較分析に使用されます。gpt-4o-mini が推奨です。
+        - generic [ref=e33]:
+          - heading "ChromaDB管理" [level=3] [ref=e34]
+          - generic [ref=e35]:
+            - heading "現在のChromaDB設定" [level=4] [ref=e36]
+            - paragraph [ref=e37]: 読み込み中...
+          - generic [ref=e38]:
+            - heading "危険な操作" [level=4] [ref=e39]
+            - paragraph [ref=e40]: ChromaDBをリセットすると、全てのベクトルデータが削除されます。 Embeddingモデルを変更した場合のみ実行してください。
+            - button "ChromaDBをリセット" [ref=e41] [cursor=pointer]
+      - generic [ref=e42]:
+        - button "設定を保存" [active] [ref=e43] [cursor=pointer]
+        - generic [ref=e44]: ✓ 保存しました
+  - generic [ref=e49] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e50]:
+      - img [ref=e51]
+    - generic [ref=e54]:
+      - button "Open issues overlay" [ref=e55]:
+        - generic [ref=e56]:
+          - generic [ref=e57]: "1"
+          - generic [ref=e58]: "2"
+        - generic [ref=e59]:
+          - text: Issue
+          - generic [ref=e60]: s
+      - button "Collapse issues badge" [ref=e61]:
+        - img [ref=e62]
+  - alert [ref=e64]
+```
