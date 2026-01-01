@@ -99,15 +99,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 認証状態の監視
   useEffect(() => {
     // リダイレクト後の認証結果を取得（必須）
-    // エラーは無視してOK（リダイレクトがない場合はnullが返る）
+    console.log('🔍 Calling getRedirectResult...');
     getRedirectResult(auth)
       .then((result) => {
         if (result) {
           console.log('✅ Redirect login successful:', result.user.email);
+        } else {
+          console.log('ℹ️ No redirect result (user probably did not just log in)');
         }
       })
-      .catch(() => {
-        // エラーは無視（iframe関連のエラーなど）
+      .catch((error) => {
+        console.error('❌ getRedirectResult error:', error.code, error.message);
       });
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
