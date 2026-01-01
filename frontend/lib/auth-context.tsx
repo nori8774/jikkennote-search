@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   User,
   signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   GoogleAuthProvider
@@ -97,6 +98,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 認証状態の監視
   useEffect(() => {
+    // リダイレクト後の認証結果を取得（必須）
+    // エラーは無視してOK（リダイレクトがない場合はnullが返る）
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result) {
+          console.log('✅ Redirect login successful:', result.user.email);
+        }
+      })
+      .catch(() => {
+        // エラーは無視（iframe関連のエラーなど）
+      });
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('🔍 onAuthStateChanged triggered:', firebaseUser ? firebaseUser.email : 'No user');
       setUser(firebaseUser);
