@@ -7,18 +7,35 @@ import yaml
 from typing import Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
+from storage import storage
 
 
 class PromptManager:
     """プロンプト管理クラス"""
 
-    def __init__(self, prompts_dir: str = "./saved_prompts"):
+    def __init__(self, team_id: Optional[str] = None, prompts_dir: Optional[str] = None):
         """
         Args:
-            prompts_dir: プロンプトを保存するディレクトリ
+            team_id: チームID（マルチテナント対応）
+            prompts_dir: プロンプトを保存するディレクトリ（デフォルト: チームディレクトリまたは./saved_prompts）
         """
-        self.prompts_dir = Path(prompts_dir)
-        self.prompts_dir.mkdir(parents=True, exist_ok=True)
+        if prompts_dir:
+            self.prompts_dir_path = prompts_dir
+        elif team_id:
+            # チーム専用のプロンプトディレクトリ
+            self.prompts_dir_path = f"teams/{team_id}/prompts"
+        else:
+            # デフォルトパス（後方互換性のため）
+            self.prompts_dir_path = "./saved_prompts"
+
+        self.team_id = team_id
+
+        # ディレクトリが存在しない場合は作成（GCSの場合は不要だが、ローカルでは必要）
+        if not storage.exists(self.prompts_dir_path):
+            # GCSの場合、ディレクトリは自動作成されるのでスキップ
+            # ローカルの場合のみ明示的に作成
+            if hasattr(storage, 'storage_type') and storage.storage_type == 'local':
+                Path(self.prompts_dir_path).mkdir(parents=True, exist_ok=True)
 
     def save_prompt(
         self,
@@ -45,10 +62,10 @@ class PromptManager:
             if not safe_name:
                 return {"success": False, "error": "無効なプロンプト名です"}
 
-            file_path = self.prompts_dir / f"{safe_name}.yaml"
+            file_path = f"{self.prompts_dir_path}/{safe_name}.yaml"
 
             # 既存ファイルのチェック
-            if file_path.exists():
+            if storage.exists(file_path):
                 return {"success": False, "error": "同じ名前のプロンプトが既に存在します"}
 
             # YAMLデータの作成
@@ -61,12 +78,12 @@ class PromptManager:
             }
 
             # YAMLファイルに保存
-            with open(file_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, allow_unicode=True, sort_keys=False)
+            yaml_content = yaml.dump(data, allow_unicode=True, sort_keys=False)
+            storage.write_file(file_path, yaml_content)
 
             return {
                 "success": True,
-                "file_path": str(file_path),
+                "file_path": file_path,
                 "name": name
             }
 
@@ -87,13 +104,13 @@ class PromptManager:
             safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_name = safe_name.replace(' ', '_')
 
-            file_path = self.prompts_dir / f"{safe_name}.yaml"
+            file_path = f"{self.prompts_dir_path}/{safe_name}.yaml"
 
-            if not file_path.exists():
+            if not storage.exists(file_path):
                 return None
 
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
+            content = storage.read_file(file_path)
+            data = yaml.safe_load(content)
 
             return data
 
@@ -111,16 +128,28 @@ class PromptManager:
         prompts = []
 
         try:
-            for file_path in self.prompts_dir.glob("*.yaml"):
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = yaml.safe_load(f)
+            # プロンプトディレクトリ配下の*.yamlファイルを取得
+            yaml_files = storage.list_files(prefix=self.prompts_dir_path, pattern="*.yaml")
+
+            for file_path in yaml_files:
+                try:
+                    content = storage.read_file(file_path)
+                    data = yaml.safe_load(content)
+
+                    # ファイル名（拡張子なし）を取得
+                    filename = file_path.split('/')[-1]
+                    file_id = filename.replace('.yaml', '')
+
                     prompts.append({
-                        "id": file_path.stem,  # ファイル名（拡張子なし）
-                        "name": data.get("name", file_path.stem),
+                        "id": file_id,
+                        "name": data.get("name", file_id),
                         "description": data.get("description", ""),
                         "created_at": data.get("created_at", ""),
                         "updated_at": data.get("updated_at", ""),
                     })
+                except Exception as file_error:
+                    print(f"ファイル読み込みエラー ({file_path}): {file_error}")
+                    continue
 
             # 更新日時でソート（新しい順）
             prompts.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
@@ -144,12 +173,12 @@ class PromptManager:
             safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_name = safe_name.replace(' ', '_')
 
-            file_path = self.prompts_dir / f"{safe_name}.yaml"
+            file_path = f"{self.prompts_dir_path}/{safe_name}.yaml"
 
-            if not file_path.exists():
+            if not storage.exists(file_path):
                 return {"success": False, "error": "プロンプトが見つかりません"}
 
-            file_path.unlink()
+            storage.delete_file(file_path)
 
             return {"success": True}
 
@@ -191,10 +220,10 @@ class PromptManager:
             # 保存
             safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_name = safe_name.replace(' ', '_')
-            file_path = self.prompts_dir / f"{safe_name}.yaml"
+            file_path = f"{self.prompts_dir_path}/{safe_name}.yaml"
 
-            with open(file_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, allow_unicode=True, sort_keys=False)
+            yaml_content = yaml.dump(data, allow_unicode=True, sort_keys=False)
+            storage.write_file(file_path, yaml_content)
 
             return {"success": True}
 

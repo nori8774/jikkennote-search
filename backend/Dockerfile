@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリケーションコードをコピー
 COPY . .
 
-# データ永続化用のディレクトリを作成
-RUN mkdir -p /app/chroma_db /app/notes/new /app/notes/archived /app/data
+# データ永続化用のディレクトリを作成（マルチテナント対応）
+RUN mkdir -p /app/chroma_db /app/notes/new /app/notes/processed /app/notes/archived /app/teams /app/data
 
 # ポート8000を公開
 EXPOSE 8000

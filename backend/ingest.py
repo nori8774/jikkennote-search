@@ -15,7 +15,7 @@ from langchain_core.documents import Document
 from config import config
 from utils import load_master_dict, normalize_text
 from storage import storage
-from chroma_sync import get_chroma_vectorstore, sync_chroma_to_gcs
+from chroma_sync import get_chroma_vectorstore, get_team_chroma_vectorstore, sync_chroma_to_gcs
 from term_extractor import TermExtractor
 from dictionary import get_dictionary_manager
 
@@ -76,7 +76,8 @@ def ingest_notes(
     post_action: str = 'move_to_processed',
     archive_folder: str = None,
     embedding_model: str = None,
-    rebuild_mode: bool = False
+    rebuild_mode: bool = False,
+    team_id: str = None  # v3.0: マルチテナント対応
 ) -> Tuple[List[str], List[str]]:
     """
     ノートをデータベースに取り込む（増分更新）
@@ -88,22 +89,35 @@ def ingest_notes(
         archive_folder: アーカイブ先フォルダパス（後方互換性のため残す）
         embedding_model: 使用するEmbeddingモデル
         rebuild_mode: ChromaDBリセット後の再構築モード（デフォルト: False）
+        team_id: チームID（v3.0）
 
     Returns:
         (new_notes, skipped_notes): 取り込んだノートIDと既存のノートID
     """
-    # パラメータのデフォルト値設定
-    if rebuild_mode:
-        # 再構築モード：notes/processedから全て読み込む
-        source_folder = source_folder or config.NOTES_PROCESSED_FOLDER
-        post_action = 'keep'  # 再構築時はファイルを移動しない
-    else:
-        # 通常モード：notes/newから読み込む
-        source_folder = source_folder or config.NOTES_NEW_FOLDER
-        post_action = post_action or 'move_to_processed'
+    # パラメータのデフォルト値設定（v3.0: チーム対応）
+    if team_id:
+        # マルチテナントモード: チーム専用パスを使用
+        if rebuild_mode:
+            source_folder = source_folder or storage.get_team_path(team_id, 'notes_processed')
+            post_action = 'keep'
+        else:
+            source_folder = source_folder or storage.get_team_path(team_id, 'notes_new')
+            post_action = post_action or 'move_to_processed'
 
-    archive_folder = archive_folder or config.NOTES_ARCHIVE_FOLDER
-    processed_folder = config.NOTES_PROCESSED_FOLDER
+        archive_folder = archive_folder or f"{storage.get_team_path(team_id, 'notes_new')}/archive"
+        processed_folder = storage.get_team_path(team_id, 'notes_processed')
+    else:
+        # 後方互換性: グローバルパスを使用
+        if rebuild_mode:
+            source_folder = source_folder or config.NOTES_PROCESSED_FOLDER
+            post_action = 'keep'
+        else:
+            source_folder = source_folder or config.NOTES_NEW_FOLDER
+            post_action = post_action or 'move_to_processed'
+
+        archive_folder = archive_folder or config.NOTES_ARCHIVE_FOLDER
+        processed_folder = config.NOTES_PROCESSED_FOLDER
+
     embedding_model = embedding_model or config.DEFAULT_EMBEDDING_MODEL
 
     # フォルダ確認（ストレージ抽象化に対応）
@@ -113,9 +127,16 @@ def ingest_notes(
     norm_map, _ = load_master_dict()
     print(f"正規化辞書ロード: {len(norm_map)} エントリ")
 
-    # ChromaDBの初期化（GCS同期付き）
+    # ChromaDBの初期化（v3.0: チーム対応）
     embeddings = OpenAIEmbeddings(model=embedding_model, api_key=api_key)
-    vectorstore = get_chroma_vectorstore(embeddings, embedding_model=embedding_model)
+    if team_id:
+        vectorstore = get_team_chroma_vectorstore(
+            team_id=team_id,
+            embeddings=embeddings,
+            embedding_model=embedding_model
+        )
+    else:
+        vectorstore = get_chroma_vectorstore(embeddings, embedding_model=embedding_model)
 
     # 既存データの確認（増分更新のため）
     if rebuild_mode:

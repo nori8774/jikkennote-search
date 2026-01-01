@@ -5,6 +5,29 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+/**
+ * 認証ヘッダーを生成する
+ *
+ * @param idToken Firebase ID Token
+ * @param teamId 現在のチームID
+ * @returns 認証ヘッダー
+ */
+export function getAuthHeaders(idToken: string | null, teamId: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (idToken) {
+    headers['Authorization'] = `Bearer ${idToken}`;
+  }
+
+  if (teamId) {
+    headers['X-Team-ID'] = teamId;
+  }
+
+  return headers;
+}
+
 export interface SearchRequest {
   purpose: string;
   materials: string;
@@ -123,10 +146,12 @@ export interface DictionaryUpdateResponse {
 }
 
 export const api = {
-  async search(request: SearchRequest): Promise<SearchResponse> {
+  async search(request: SearchRequest, idToken: string | null = null, teamId: string | null = null): Promise<SearchResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+
     const response = await fetch(`${API_BASE_URL}/search`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
     });
 
@@ -152,10 +177,42 @@ export const api = {
     return response.json();
   },
 
-  async ingest(request: IngestRequest): Promise<IngestResponse> {
+  async uploadNotes(files: FileList, idToken: string | null = null, teamId: string | null = null): Promise<{ success: boolean; message: string; uploaded_files: string[] }> {
+    const formData = new FormData();
+
+    // Add all files to form data
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+
+    const headers: Record<string, string> = {};
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    if (teamId) {
+      headers['X-Team-ID'] = teamId;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/upload/notes`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Upload failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async ingest(request: IngestRequest, idToken: string | null = null, teamId: string | null = null): Promise<IngestResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+
     const response = await fetch(`${API_BASE_URL}/ingest`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
     });
 
@@ -181,10 +238,12 @@ export const api = {
     return response.json();
   },
 
-  async analyzeNewTerms(request: AnalyzeRequest): Promise<AnalyzeResponse> {
+  async analyzeNewTerms(request: AnalyzeRequest, idToken: string | null = null, teamId: string | null = null): Promise<AnalyzeResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+
     const response = await fetch(`${API_BASE_URL}/ingest/analyze`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
     });
 
@@ -195,8 +254,9 @@ export const api = {
     return response.json();
   },
 
-  async getDictionary(): Promise<DictionaryResponse> {
-    const response = await fetch(`${API_BASE_URL}/dictionary`);
+  async getDictionary(idToken: string | null = null, teamId: string | null = null): Promise<DictionaryResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/dictionary`, { headers });
 
     if (!response.ok) {
       throw new Error(`Get dictionary failed: ${response.statusText}`);
@@ -205,10 +265,11 @@ export const api = {
     return response.json();
   },
 
-  async updateDictionary(request: DictionaryUpdateRequest): Promise<DictionaryUpdateResponse> {
+  async updateDictionary(request: DictionaryUpdateRequest, idToken: string | null = null, teamId: string | null = null): Promise<DictionaryUpdateResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
     const response = await fetch(`${API_BASE_URL}/dictionary/update`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
     });
 
@@ -219,8 +280,11 @@ export const api = {
     return response.json();
   },
 
-  async exportDictionary(format: 'yaml' | 'json' | 'csv' = 'yaml'): Promise<Blob> {
-    const response = await fetch(`${API_BASE_URL}/dictionary/export?format=${format}`);
+  async exportDictionary(format: 'yaml' | 'json' | 'csv' = 'yaml', idToken: string | null = null, teamId: string | null = null): Promise<Blob> {
+    const headers = getAuthHeaders(idToken, teamId);
+    // FormDataの場合はContent-Typeを削除
+    delete headers['Content-Type'];
+    const response = await fetch(`${API_BASE_URL}/dictionary/export?format=${format}`, { headers });
 
     if (!response.ok) {
       throw new Error(`Export dictionary failed: ${response.statusText}`);
@@ -229,12 +293,17 @@ export const api = {
     return response.blob();
   },
 
-  async importDictionary(file: File): Promise<{ success: boolean; message: string }> {
+  async importDictionary(file: File, idToken: string | null = null, teamId: string | null = null): Promise<{ success: boolean; message: string }> {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers = getAuthHeaders(idToken, teamId);
+    // FormDataの場合はContent-Typeを削除（ブラウザが自動設定）
+    delete headers['Content-Type'];
+
     const response = await fetch(`${API_BASE_URL}/dictionary/import`, {
       method: 'POST',
+      headers,
       body: formData,
     });
 
@@ -245,13 +314,59 @@ export const api = {
     return response.json();
   },
 
+  async editDictionaryEntry(
+    canonical: string,
+    updates: {
+      new_canonical?: string;
+      variants?: string[];
+      category?: string;
+      note?: string;
+    },
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<{ success: boolean; message: string }> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/dictionary/entry`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        canonical,
+        ...updates,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(errorData.detail || `Edit dictionary entry failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async deleteDictionaryEntry(canonical: string, idToken: string | null = null, teamId: string | null = null): Promise<{ success: boolean; message: string }> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/dictionary/entry`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ canonical }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(errorData.detail || `Delete dictionary entry failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
   // === Prompt Management APIs ===
 
   /**
    * 保存されているプロンプトの一覧を取得
    */
-  async listSavedPrompts() {
-    const response = await fetch(`${API_BASE_URL}/prompts/list`);
+  async listSavedPrompts(idToken: string | null = null, teamId: string | null = null) {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/prompts/list`, { headers });
 
     if (!response.ok) {
       throw new Error(`List prompts failed: ${response.statusText}`);
@@ -263,12 +378,11 @@ export const api = {
   /**
    * プロンプトをYAMLファイルとして保存
    */
-  async savePrompt(name: string, prompts: Record<string, string>, description?: string) {
+  async savePrompt(name: string, prompts: Record<string, string>, description?: string, idToken: string | null = null, teamId: string | null = null) {
+    const headers = getAuthHeaders(idToken, teamId);
     const response = await fetch(`${API_BASE_URL}/prompts/save`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         name,
         prompts,
@@ -287,8 +401,9 @@ export const api = {
   /**
    * プロンプトをYAMLファイルから読み込み
    */
-  async loadPrompt(name: string) {
-    const response = await fetch(`${API_BASE_URL}/prompts/load/${encodeURIComponent(name)}`);
+  async loadPrompt(name: string, idToken: string | null = null, teamId: string | null = null) {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/prompts/load/${encodeURIComponent(name)}`, { headers });
 
     if (!response.ok) {
       throw new Error(`Load prompt failed: ${response.statusText}`);
@@ -300,9 +415,11 @@ export const api = {
   /**
    * プロンプトを削除
    */
-  async deletePrompt(name: string) {
+  async deletePrompt(name: string, idToken: string | null = null, teamId: string | null = null) {
+    const headers = getAuthHeaders(idToken, teamId);
     const response = await fetch(`${API_BASE_URL}/prompts/delete/${encodeURIComponent(name)}`, {
       method: 'DELETE',
+      headers,
     });
 
     if (!response.ok) {
@@ -316,12 +433,11 @@ export const api = {
   /**
    * プロンプトを更新
    */
-  async updatePrompt(name: string, prompts?: Record<string, string>, description?: string) {
+  async updatePrompt(name: string, prompts?: Record<string, string>, description?: string, idToken: string | null = null, teamId: string | null = null) {
+    const headers = getAuthHeaders(idToken, teamId);
     const response = await fetch(`${API_BASE_URL}/prompts/update`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         name,
         prompts,

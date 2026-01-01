@@ -1,0 +1,91 @@
+INFO:     Started server process [50732]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Using local storage: .
+🚀 実験ノート検索システム API サーバー起動中...
+📍 Server: http://localhost:8000
+📚 API Docs: http://localhost:8000/docs
+🔧 Phase 4: 履歴・評価機能実装中
+
+INFO:     127.0.0.1:59988 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60004 - "OPTIONS /teams HTTP/1.1" 200 OK
+✅ Firebase Admin SDK initialized successfully
+INFO:     127.0.0.1:60004 - "GET /teams HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60006 - "GET /teams HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60016 - "GET /notes/ID1-2 HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:60019 - "OPTIONS /search HTTP/1.1" 200 OK
+Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+Failed to send telemetry event ClientCreateCollectionEvent: capture() takes 1 positional argument but 3 were given
+Failed to send telemetry event CollectionQueryEvent: capture() takes 1 positional argument but 3 were given
+Number of requested results 20 is greater than number of elements in index 6, updating n_results = 6
+
+--- 🚀 [1/4] 正規化 & JSON解析 ---
+  ⏱️ Execution Time: 0.0003 sec
+--- 🧠 [2/4] 多角的検索クエリ生成 ---
+  > Generated Query: 化学物質とその容量、手順が類似している実験ノートを検索。特に、使用される化学物質の種類とその具体的な容量に注目し、手順の詳細が一致するものを優先。 使用される化学物質名とその容量、実験手順が似ている実...
+  ⏱️ Execution Time: 3.0905 sec
+--- 🔍 [3/4] 検索 & Cohereリランキング実行 ---
+  > ChromaDB Collection: 6 documents
+  > Vector Search: Retrieved 6 candidates.
+
+  📊 [Console Log] Top 10 Cohere Rerank Results:
+  --------------------------------------------------
+  Rank  1 | Score: 1.0000 | ID: ID2-33 | <!-- ファイル名：ID2-33.md --> # 実験ノート ID2-33  ## 目的  CH...
+  Rank  2 | Score: 1.0000 | ID: ID2-36 | <!-- ファイル名：ID2-36.md --> # 実験ノート ID2-36  ## 目的  Hb...
+  Rank  3 | Score: 1.0000 | ID: ID2-34 | <!-- ファイル名：ID2-34.md --> # 実験ノート ID2-34  ## 目的  HE...
+  Rank  4 | Score: 1.0000 | ID: ID2-32 | <!-- ファイル名：ID2-32.md --> # 実験ノート ID2-32  ## 目的  2-...
+  Rank  5 | Score: 1.0000 | ID: ID2-31 | <!-- ファイル名：ID2-31.md --> # 実験ノート ID2-31  ## 目的  Hb...
+  Rank  6 | Score: 0.9999 | ID: ID2-35 | <!-- ファイル名：ID2-35.md --> # 実験ノート ID2-35  ## 目的  Hb...
+  --------------------------------------------------
+  > UI向けに上位 3 件を選択しました。
+  ⏱️ Execution Time: 2.1046 sec
+--- 📝 [4/4] 比較・要約生成 (Deep Analysis) ---
+  ⏱️ Execution Time: 36.0811 sec
+INFO:     127.0.0.1:60019 - "POST /search HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60030 - "GET /teams HTTP/1.1" 200 OK
+Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+Failed to send telemetry event ClientCreateCollectionEvent: capture() takes 1 positional argument but 3 were given
+Failed to send telemetry event CollectionQueryEvent: capture() takes 1 positional argument but 3 were given
+Number of requested results 20 is greater than number of elements in index 7, updating n_results = 7
+
+--- 🚀 [1/4] 正規化 & JSON解析 ---
+  ⏱️ Execution Time: 0.0000 sec
+--- 🧠 [2/4] 多角的検索クエリ生成 ---
+  > Generated Query: 化学物質とその容量、手順が類似している実験ノートを検索。特に、使用される化学物質の種類とその具体的な容量に焦点を当て、手順の詳細な記述が一致するものを優先。 使用されている化学物質名とその容量、実験手...
+  ⏱️ Execution Time: 3.1601 sec
+--- 🔍 [3/4] 検索 & Cohereリランキング実行 ---
+  > ChromaDB Collection: 7 documents
+  > Vector Search: Retrieved 7 candidates.
+
+  📊 [Console Log] Top 10 Cohere Rerank Results:
+  --------------------------------------------------
+  Rank  1 | Score: 1.0000 | ID: ID1-4 | <!-- ファイル名：ID1-4.md --> # 実験ノート ID1-4  ## 目的  1-1基...
+  Rank  2 | Score: 1.0000 | ID: ID1-2 | <!-- ファイル名：ID1-2.md --> # 実験ノート ID1-2  ## 目的  1-1基...
+  Rank  3 | Score: 1.0000 | ID: ID1-2 | <!-- ファイル名：ID1-2.md --> # 実験ノート ID1-2  ## 目的  1-1基...
+  Rank  4 | Score: 1.0000 | ID: ID1-3 | <!-- ファイル名：ID1-3.md --> # 実験ノート ID1-3  ## 目的  1-1基...
+  Rank  5 | Score: 1.0000 | ID: ID1-3 | <!-- ファイル名：ID1-3.md --> # 実験ノート ID1-3  ## 目的  1-1基...
+  Rank  6 | Score: 1.0000 | ID: ID1-1 | <!-- ファイル名：ID1-1.md --> # 実験ノート ID1-1  ## 目的  現行Hb...
+  Rank  7 | Score: 1.0000 | ID: ID1-1 | <!-- ファイル名：ID1-1.md --> # 実験ノート ID1-1  ## 目的  現行Hb...
+  --------------------------------------------------
+  > UI向けに上位 3 件を選択しました。
+  ⏱️ Execution Time: 0.5787 sec
+--- 📝 [4/4] 比較・要約生成 (Deep Analysis) ---
+  ⏱️ Execution Time: 24.9176 sec
+INFO:     127.0.0.1:60032 - "POST /search HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51242 - "OPTIONS /teams HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51242 - "GET /teams HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51274 - "GET /chroma/info HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51276 - "GET /chroma/info HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51273 - "GET /prompts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51275 - "GET /prompts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51398 - "GET /chroma/info HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51397 - "GET /prompts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51398 - "GET /teams HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51532 - "GET /chroma/info HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51531 - "GET /prompts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51531 - "OPTIONS /teams HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51532 - "GET /teams HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:52294 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52296 - "GET /teams HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:52298 - "GET /chroma/info HTTP/1.1" 401 Unauthorized

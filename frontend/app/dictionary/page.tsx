@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Button from '@/components/Button';
 import { api, DictionaryEntry } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 
 export default function DictionaryPage() {
+  const { idToken, currentTeamId } = useAuth();
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [filteredEntries, setFilteredEntries] = useState<DictionaryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -12,12 +14,31 @@ export default function DictionaryPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // 編集モーダル用
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<DictionaryEntry | null>(null);
+  const [editForm, setEditForm] = useState({
+    canonical: '',
+    variants: [] as string[],
+    category: '',
+    note: '',
+  });
+
+  // ファイル入力用のref
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // 辞書を読み込み
   const loadDictionary = async () => {
+    // 認証情報が揃っていない場合はスキップ
+    if (!idToken || !currentTeamId) {
+      setError('認証情報が取得できていません。ログインしているか確認してください。');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
-      const response = await api.getDictionary();
+      const response = await api.getDictionary(idToken, currentTeamId);
       if (response.success) {
         setEntries(response.entries);
         setFilteredEntries(response.entries);
@@ -29,10 +50,12 @@ export default function DictionaryPage() {
     }
   };
 
-  // 初期読み込み
+  // 初期読み込み（認証情報が揃ったら実行）
   useEffect(() => {
-    loadDictionary();
-  }, []);
+    if (idToken && currentTeamId) {
+      loadDictionary();
+    }
+  }, [idToken, currentTeamId]);
 
   // 検索フィルター
   useEffect(() => {
@@ -52,10 +75,15 @@ export default function DictionaryPage() {
 
   // エクスポート
   const handleExport = async (format: 'yaml' | 'json' | 'csv') => {
+    if (!idToken || !currentTeamId) {
+      setError('認証情報が取得できていません。ページを再読み込みしてください。');
+      return;
+    }
+
     setError('');
     setSuccess('');
     try {
-      const blob = await api.exportDictionary(format);
+      const blob = await api.exportDictionary(format, idToken, currentTeamId);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -75,12 +103,18 @@ export default function DictionaryPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (!idToken || !currentTeamId) {
+      setError('認証情報が取得できていません。ページを再読み込みしてください。');
+      event.target.value = '';
+      return;
+    }
+
     setError('');
     setSuccess('');
     setLoading(true);
 
     try {
-      const response = await api.importDictionary(file);
+      const response = await api.importDictionary(file, idToken, currentTeamId);
       if (response.success) {
         setSuccess(response.message);
         await loadDictionary();
@@ -91,6 +125,99 @@ export default function DictionaryPage() {
       setLoading(false);
       // ファイル入力をリセット
       event.target.value = '';
+    }
+  };
+
+  // 編集モーダルを開く
+  const openEditModal = (entry: DictionaryEntry) => {
+    setEditingEntry(entry);
+    setEditForm({
+      canonical: entry.canonical,
+      variants: [...entry.variants],
+      category: entry.category || '',
+      note: entry.note || '',
+    });
+    setShowEditModal(true);
+  };
+
+  // 編集を保存
+  const handleEdit = async () => {
+    if (!idToken || !currentTeamId || !editingEntry) {
+      setError('認証情報が取得できていません。ページを再読み込みしてください。');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    try {
+      const updates: any = {};
+
+      // 正規化名が変更されている場合
+      if (editForm.canonical !== editingEntry.canonical) {
+        updates.new_canonical = editForm.canonical;
+      }
+
+      // バリアントが変更されている場合
+      if (JSON.stringify(editForm.variants) !== JSON.stringify(editingEntry.variants)) {
+        updates.variants = editForm.variants;
+      }
+
+      // カテゴリが変更されている場合
+      if (editForm.category !== (editingEntry.category || '')) {
+        updates.category = editForm.category;
+      }
+
+      // メモが変更されている場合
+      if (editForm.note !== (editingEntry.note || '')) {
+        updates.note = editForm.note;
+      }
+
+      const response = await api.editDictionaryEntry(
+        editingEntry.canonical,
+        updates,
+        idToken,
+        currentTeamId
+      );
+
+      if (response.success) {
+        setSuccess(response.message);
+        setShowEditModal(false);
+        await loadDictionary();
+      }
+    } catch (err: any) {
+      setError(err.message || 'エントリの編集に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 削除
+  const handleDelete = async (canonical: string) => {
+    if (!idToken || !currentTeamId) {
+      setError('認証情報が取得できていません。ページを再読み込みしてください。');
+      return;
+    }
+
+    if (!confirm(`「${canonical}」を削除しますか？この操作は元に戻せません。`)) {
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    try {
+      const response = await api.deleteDictionaryEntry(canonical, idToken, currentTeamId);
+      if (response.success) {
+        setSuccess(response.message);
+        await loadDictionary();
+      }
+    } catch (err: any) {
+      setError(err.message || 'エントリの削除に失敗しました');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -139,18 +266,25 @@ export default function DictionaryPage() {
             </div>
 
             {/* インポート */}
-            <div>
-              <label className="cursor-pointer">
-                <Button variant="secondary" className="text-sm" type="button">
-                  インポート
-                </Button>
-                <input
-                  type="file"
-                  accept=".yaml,.yml,.json,.csv"
-                  className="hidden"
-                  onChange={handleImport}
-                />
-              </label>
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="secondary"
+                className="text-sm"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                📂 ファイルから読み込み
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".yaml,.yml,.json,.csv"
+                className="hidden"
+                onChange={handleImport}
+              />
+              <p className="text-xs text-gray-600">
+                YAML/JSON/CSV形式のファイルを選択してインポート
+              </p>
             </div>
 
             {/* リロード */}
@@ -252,6 +386,24 @@ export default function DictionaryPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* アクションボタン */}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => openEditModal(entry)}
+                        className="text-sm"
+                      >
+                        編集
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleDelete(entry.canonical)}
+                        className="text-sm bg-red-100 hover:bg-red-200 text-red-800"
+                      >
+                        削除
+                      </Button>
+                    </div>
                   </div>
 
                   {/* メモ */}
@@ -266,6 +418,82 @@ export default function DictionaryPage() {
             </div>
           )}
         </div>
+
+        {/* 編集モーダル */}
+        {showEditModal && editingEntry && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <h2 className="text-2xl font-bold mb-6">エントリ編集</h2>
+
+              {/* 正規化名 */}
+              <div className="mb-4">
+                <label className="block text-sm font-bold mb-2">正規化名</label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-md p-3"
+                  value={editForm.canonical}
+                  onChange={(e) => setEditForm({ ...editForm, canonical: e.target.value })}
+                />
+              </div>
+
+              {/* バリアント */}
+              <div className="mb-4">
+                <label className="block text-sm font-bold mb-2">表記揺れ（カンマ区切り）</label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-md p-3"
+                  value={editForm.variants.join(', ')}
+                  onChange={(e) => setEditForm({
+                    ...editForm,
+                    variants: e.target.value.split(',').map(v => v.trim()).filter(v => v)
+                  })}
+                  placeholder="例: エタノール, EtOH, 無水エタノール"
+                />
+              </div>
+
+              {/* カテゴリ */}
+              <div className="mb-4">
+                <label className="block text-sm font-bold mb-2">カテゴリ</label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-md p-3"
+                  value={editForm.category}
+                  onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                  placeholder="例: 溶媒, 試薬, 器具"
+                />
+              </div>
+
+              {/* メモ */}
+              <div className="mb-6">
+                <label className="block text-sm font-bold mb-2">メモ</label>
+                <textarea
+                  className="w-full border border-gray-300 rounded-md p-3"
+                  value={editForm.note}
+                  onChange={(e) => setEditForm({ ...editForm, note: e.target.value })}
+                  rows={3}
+                  placeholder="補足情報やメモを入力"
+                />
+              </div>
+
+              {/* ボタン */}
+              <div className="flex gap-4 justify-end">
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowEditModal(false)}
+                  disabled={loading}
+                >
+                  キャンセル
+                </Button>
+                <Button
+                  onClick={handleEdit}
+                  disabled={loading}
+                >
+                  {loading ? '保存中...' : '保存'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

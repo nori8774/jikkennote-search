@@ -588,10 +588,13 @@ class Storage:
     """
     統一ストレージインターフェース
     環境変数でローカル/GCS/Google Driveを自動切り替え
+
+    v3.0: マルチテナント対応
     """
 
     def __init__(self):
         storage_type = os.getenv("STORAGE_TYPE", "local")
+        self.storage_type = storage_type  # v3.0: 外部からアクセス可能に
 
         if storage_type == "google_drive":
             credentials_path = os.getenv("GOOGLE_DRIVE_CREDENTIALS_PATH")
@@ -608,6 +611,44 @@ class Storage:
             base_path = os.getenv("STORAGE_BASE_PATH", ".")
             self.backend = LocalStorage(base_path)
             print(f"Using local storage: {base_path}")
+
+    @property
+    def bucket(self):
+        """GCSバケットへのアクセス（teams.pyで使用）"""
+        if isinstance(self.backend, GCSStorage):
+            return self.backend.bucket
+        return None
+
+    def get_team_path(self, team_id: str, resource_type: str) -> str:
+        """
+        チームスコープのパスを生成（v3.0新規）
+
+        Args:
+            team_id: チームID
+            resource_type: リソースタイプ
+                - 'notes_new': 新規ノート
+                - 'notes_processed': 処理済みノート
+                - 'prompts': 保存されたプロンプト
+                - 'dictionary': 正規化辞書
+                - 'chroma': ChromaDB永続化
+
+        Returns:
+            チームスコープのパス
+        """
+        if self.storage_type == 'gcs':
+            base = f"teams/{team_id}"
+        else:
+            base = f"teams/{team_id}"
+
+        paths = {
+            'notes_new': f"{base}/notes/new",
+            'notes_processed': f"{base}/notes/processed",
+            'prompts': f"{base}/saved_prompts",
+            'dictionary': f"{base}/dictionary.yaml",
+            'chroma': f"{base}/chroma-db"
+        }
+
+        return paths.get(resource_type, base)
 
     def read_file(self, path: str) -> str:
         """ファイルを読み込む"""

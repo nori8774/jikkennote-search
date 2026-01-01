@@ -18,7 +18,7 @@ import cohere
 from config import config
 from utils import load_master_dict, normalize_text
 from prompts import get_default_prompt
-from chroma_sync import get_chroma_vectorstore
+from chroma_sync import get_chroma_vectorstore, get_team_chroma_vectorstore
 
 
 # --- State定義 ---
@@ -51,7 +51,8 @@ class SearchAgent:
         cohere_api_key: str,
         embedding_model: str = None,
         llm_model: str = None,
-        prompts: dict = None
+        prompts: dict = None,
+        team_id: str = None  # v3.0: マルチテナント対応
     ):
         """
         Args:
@@ -60,9 +61,11 @@ class SearchAgent:
             embedding_model: Embeddingモデル名
             llm_model: LLMモデル名
             prompts: カスタムプロンプト辞書 {"query_generation": "...", "compare": "..."}
+            team_id: チームID（v3.0）
         """
         self.openai_api_key = openai_api_key
         self.cohere_api_key = cohere_api_key
+        self.team_id = team_id
 
         # モデル設定
         self.embedding_model = embedding_model or config.DEFAULT_EMBEDDING_MODEL
@@ -83,8 +86,19 @@ class SearchAgent:
             api_key=self.openai_api_key
         )
 
-        # Vector Store（GCS同期付き）
-        self.vectorstore = get_chroma_vectorstore(self.embedding_function)
+        # Vector Store（v3.0: チーム対応）
+        if team_id:
+            self.vectorstore = get_team_chroma_vectorstore(
+                team_id=team_id,
+                embeddings=self.embedding_function,
+                embedding_model=self.embedding_model
+            )
+        else:
+            # 後方互換性: team_idがない場合はグローバルを使用
+            self.vectorstore = get_chroma_vectorstore(
+                self.embedding_function,
+                embedding_model=self.embedding_model
+            )
 
         # LLM
         self.llm = ChatOpenAI(
@@ -260,6 +274,11 @@ class SearchAgent:
         query = state["search_query"]
 
         try:
+            # ChromaDBのドキュメント数を確認
+            collection = self.vectorstore._collection
+            doc_count = collection.count()
+            print(f"  > ChromaDB Collection: {doc_count} documents")
+
             # ベクトル検索
             candidates = self.vectorstore.similarity_search(query, k=config.VECTOR_SEARCH_K)
 

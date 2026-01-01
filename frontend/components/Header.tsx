@@ -1,18 +1,38 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth-context';
 
 export default function Header() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, currentTeamId, teams, logout, switchTeam } = useAuth();
 
   const navItems = [
     { href: '/search', label: '検索' },
     { href: '/viewer', label: 'ビューワー' },
     { href: '/ingest', label: 'ノート管理' },
     { href: '/dictionary', label: '辞書管理' },
+    { href: '/teams', label: 'チーム管理' },
     { href: '/settings', label: '設定' },
   ];
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  const handleTeamChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newTeamId = e.target.value;
+    switchTeam(newTeamId);
+    // チーム切り替え時、ページをリロードしてデータを再取得
+    window.location.reload();
+  };
 
   return (
     <header className="bg-primary text-white shadow-md">
@@ -22,7 +42,7 @@ export default function Header() {
             実験ノート検索システム
           </Link>
 
-          <nav className="flex space-x-6">
+          <nav className="flex items-center space-x-6">
             {navItems.map((item) => (
               <Link
                 key={item.href}
@@ -34,6 +54,53 @@ export default function Header() {
                 {item.label}
               </Link>
             ))}
+
+            {/* チーム選択ドロップダウン（ログイン時のみ） */}
+            {user && teams.length > 0 && (
+              <div className="flex items-center space-x-2">
+                <span className="text-sm">チーム:</span>
+                <select
+                  value={currentTeamId || ''}
+                  onChange={handleTeamChange}
+                  className="bg-white text-gray-900 rounded px-2 py-1 text-sm"
+                >
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* ユーザー情報とログアウトボタン */}
+            {user ? (
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  {user.photoURL && (
+                    <img
+                      src={user.photoURL}
+                      alt={user.displayName || 'User'}
+                      className="w-8 h-8 rounded-full"
+                    />
+                  )}
+                  <span className="text-sm">{user.displayName || user.email}</span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-sm hover:opacity-80 transition-opacity border border-white px-3 py-1 rounded"
+                >
+                  ログアウト
+                </button>
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                className="text-sm hover:opacity-80 transition-opacity border border-white px-3 py-1 rounded"
+              >
+                ログイン
+              </Link>
+            )}
           </nav>
         </div>
       </div>

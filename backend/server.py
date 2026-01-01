@@ -2,7 +2,7 @@
 FastAPI Server for Experiment Notes Search System
 実験ノート検索システムのメインAPIサーバー
 """
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -21,14 +21,22 @@ from history import get_history_manager
 from evaluation import get_evaluator
 from storage import storage
 from prompt_manager import PromptManager
+from middleware import AuthMiddleware, TeamMiddleware
+from auth import verify_firebase_token
+import teams
 
 app = FastAPI(
     title="実験ノート検索システム API",
-    version="2.0.0",
-    description="LangChainを活用した高精度な実験ノート検索システム"
+    version="3.0.0",
+    description="LangChainを活用した高精度な実験ノート検索システム（マルチテナント対応）"
 )
 
-# CORS設定
+# 認証ミドルウェア（v3.0: Firebase ID Token検証）
+# 注意: ミドルウェアは逆順で実行されるため、CORSミドルウェアを最後に追加
+app.add_middleware(TeamMiddleware)
+app.add_middleware(AuthMiddleware)
+
+# CORS設定（最後に追加することで、OPTIONSリクエストが最初に処理される）
 # 環境変数からCORS originsを取得（カンマ区切り）
 cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
 cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
@@ -107,6 +115,12 @@ class IngestResponse(BaseModel):
     skipped_notes: List[str]
 
 
+class UploadNotesResponse(BaseModel):
+    success: bool
+    message: str
+    uploaded_files: List[str]
+
+
 class NoteResponse(BaseModel):
     success: bool
     note: Optional[Dict] = None
@@ -137,6 +151,28 @@ class DictionaryUpdateResponse(BaseModel):
 class DictionaryResponse(BaseModel):
     success: bool
     entries: List[Dict]
+
+
+class DictionaryEditRequest(BaseModel):
+    canonical: str  # 編集対象のエントリの正規化名
+    new_canonical: Optional[str] = None  # 新しい正規化名（変更する場合）
+    variants: Optional[List[str]] = None  # 新しいバリアントリスト
+    category: Optional[str] = None  # 新しいカテゴリ
+    note: Optional[str] = None  # 新しいメモ
+
+
+class DictionaryEditResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class DictionaryDeleteRequest(BaseModel):
+    canonical: str  # 削除するエントリの正規化名
+
+
+class DictionaryDeleteResponse(BaseModel):
+    success: bool
+    message: str
 
 
 class HistoryRequest(BaseModel):
@@ -195,6 +231,44 @@ class BatchEvaluateResponse(BaseModel):
     individual_results: List[Dict]
 
 
+# === チーム管理 Request/Response Models（v3.0新規） ===
+
+class CreateTeamRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class CreateTeamResponse(BaseModel):
+    success: bool
+    team: Dict
+    message: str
+
+
+class JoinTeamRequest(BaseModel):
+    inviteCode: str
+
+
+class JoinTeamResponse(BaseModel):
+    success: bool
+    teamId: str
+    message: str
+
+
+class LeaveTeamResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class DeleteTeamResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class TeamsListResponse(BaseModel):
+    success: bool
+    teams: List[Dict]
+
+
 # === Endpoints ===
 
 @app.get("/")
@@ -202,16 +276,196 @@ async def root():
     """ルートエンドポイント"""
     return {
         "message": "実験ノート検索システム API",
-        "version": "2.0.0",
-        "status": "Phase 1: 基盤整備中",
+        "version": "3.0.0",
+        "status": "Phase 1: マルチテナント基盤整備中",
         "endpoints": {
             "health": "/health - ヘルスチェック",
+            "auth": "/auth/verify - Firebase ID Token検証（内部用）",
+            "teams": "/teams - チーム管理",
             "config": "/config/folders - フォルダパス設定",
             "search": "/search - 実験ノート検索",
             "prompts": "/prompts - デフォルトプロンプト取得",
             "ingest": "/ingest - ノート取り込み",
         }
     }
+
+
+# === 認証API（v3.0新規） ===
+
+class AuthVerifyRequest(BaseModel):
+    id_token: str
+
+
+class AuthVerifyResponse(BaseModel):
+    success: bool
+    uid: str
+    email: str
+    displayName: Optional[str] = None
+
+
+@app.post("/auth/verify", response_model=AuthVerifyResponse)
+async def verify_token(request: AuthVerifyRequest):
+    """
+    Firebase ID Tokenを検証する（内部用エンドポイント）
+
+    クライアントから送られたFirebase ID Tokenを検証し、
+    ユーザー情報を返します。
+    """
+    try:
+        decoded_token = await verify_firebase_token(request.id_token)
+
+        return AuthVerifyResponse(
+            success=True,
+            uid=decoded_token.get("uid", ""),
+            email=decoded_token.get("email", ""),
+            displayName=decoded_token.get("name")
+        )
+    except HTTPException as e:
+        raise e
+
+
+# === チーム管理API（v3.0新規） ===
+
+@app.get("/teams", response_model=TeamsListResponse)
+async def get_user_teams(request: Request):
+    """
+    ユーザーが所属するチーム一覧を取得
+
+    認証ミドルウェアで設定された request.state.user を使用
+    """
+    try:
+        user_id = request.state.user.get("uid")
+        user_teams = teams.get_user_teams(user_id)
+
+        return TeamsListResponse(
+            success=True,
+            teams=user_teams
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/teams/create", response_model=CreateTeamResponse)
+async def create_team(request: Request, req: CreateTeamRequest):
+    """
+    新しいチームを作成
+
+    Args:
+        req: チーム作成リクエスト（name, description）
+
+    Returns:
+        作成されたチーム情報（招待コード含む）
+    """
+    try:
+        user = request.state.user
+        user_id = user.get("uid")
+        user_email = user.get("email")
+        user_display_name = user.get("name")
+
+        team = teams.create_team(
+            user_id=user_id,
+            user_email=user_email,
+            user_display_name=user_display_name,
+            name=req.name,
+            description=req.description
+        )
+
+        return CreateTeamResponse(
+            success=True,
+            team=team,
+            message=f"Team '{req.name}' created successfully"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/teams/join", response_model=JoinTeamResponse)
+async def join_team(request: Request, req: JoinTeamRequest):
+    """
+    招待コードでチームに参加
+
+    Args:
+        req: 招待コード
+
+    Returns:
+        参加したチーム情報
+    """
+    try:
+        user = request.state.user
+        user_id = user.get("uid")
+        user_email = user.get("email")
+        user_display_name = user.get("name")
+
+        result = teams.join_team(
+            user_id=user_id,
+            user_email=user_email,
+            user_display_name=user_display_name,
+            invite_code=req.inviteCode
+        )
+
+        return JoinTeamResponse(
+            success=True,
+            teamId=result['id'],
+            message=result['message']
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/teams/{team_id}/leave", response_model=LeaveTeamResponse)
+async def leave_team(request: Request, team_id: str):
+    """
+    チームから脱退
+
+    Args:
+        team_id: 脱退するチームID
+
+    Returns:
+        脱退結果
+    """
+    try:
+        user_id = request.state.user.get("uid")
+        result = teams.leave_team(user_id, team_id)
+
+        return LeaveTeamResponse(
+            success=result['success'],
+            message=result['message']
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/teams/{team_id}", response_model=DeleteTeamResponse)
+async def delete_team(request: Request, team_id: str):
+    """
+    チームを削除
+
+    Args:
+        team_id: 削除するチームID
+
+    Returns:
+        削除結果
+
+    Note:
+        - Firestoreからチーム情報を削除
+        - GCSからチームフォルダを削除
+        - ChromaDBコレクションを削除
+    """
+    try:
+        result = teams.delete_team(team_id)
+
+        return DeleteTeamResponse(
+            success=result['success'],
+            message=result['message']
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -277,16 +531,20 @@ async def get_folder_paths():
 
 
 @app.post("/search", response_model=SearchResponse)
-async def search_experiments(request: SearchRequest):
-    """実験ノート検索"""
+async def search_experiments(req_obj: Request, request: SearchRequest):
+    """実験ノート検索（v3.0: マルチテナント対応）"""
     try:
+        # チームIDを取得（v3.0）
+        team_id = getattr(req_obj.state, 'team_id', None)
+
         # エージェント初期化
         agent = SearchAgent(
             openai_api_key=request.openai_api_key,
             cohere_api_key=request.cohere_api_key,
             embedding_model=request.embedding_model,
             llm_model=request.llm_model,
-            prompts=request.custom_prompts
+            prompts=request.custom_prompts,
+            team_id=team_id  # v3.0: チームID指定
         )
 
         # 検索実行
@@ -341,17 +599,78 @@ async def get_default_prompts():
         raise HTTPException(status_code=500, detail=f"プロンプト取得エラー: {str(e)}")
 
 
-@app.post("/ingest", response_model=IngestResponse)
-async def ingest_notes_endpoint(request: IngestRequest):
-    """ノート取り込み（増分更新 or ChromaDB再構築）"""
+@app.post("/upload/notes", response_model=UploadNotesResponse)
+async def upload_notes(
+    req_obj: Request,
+    files: List[UploadFile] = File(...)
+):
+    """
+    ノートファイルのアップロード（v3.0: マルチテナント対応）
+
+    アップロードされたMarkdownファイルをチーム専用の notes/new フォルダに保存します。
+    """
     try:
+        # チームIDを取得（v3.0）
+        team_id = getattr(req_obj.state, 'team_id', None)
+
+        # 保存先フォルダを決定
+        if team_id:
+            upload_folder = storage.get_team_path(team_id, 'notes_new')
+        else:
+            # 後方互換性: グローバルパス
+            upload_folder = config.NOTES_NEW_FOLDER
+
+        # フォルダが存在しない場合は作成
+        from pathlib import Path
+        Path(upload_folder).mkdir(parents=True, exist_ok=True)
+
+        uploaded_files = []
+
+        for file in files:
+            # ファイル名の検証
+            if not file.filename.endswith('.md'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Markdownファイル(.md)のみアップロード可能です: {file.filename}"
+                )
+
+            # ファイル内容を読み込み
+            content = await file.read()
+
+            # ファイルを保存
+            file_path = f"{upload_folder}/{file.filename}"
+            storage.write_file(file_path, content.decode('utf-8'))
+
+            uploaded_files.append(file.filename)
+
+        return UploadNotesResponse(
+            success=True,
+            message=f"{len(uploaded_files)}件のファイルをアップロードしました",
+            uploaded_files=uploaded_files
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in upload_notes: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ファイルアップロードエラー: {str(e)}")
+
+
+@app.post("/ingest", response_model=IngestResponse)
+async def ingest_notes_endpoint(req_obj: Request, request: IngestRequest):
+    """ノート取り込み（増分更新 or ChromaDB再構築、v3.0: マルチテナント対応）"""
+    try:
+        # チームIDを取得（v3.0）
+        team_id = getattr(req_obj.state, 'team_id', None)
+
         new_notes, skipped_notes = ingest_notes(
             api_key=request.openai_api_key,
             source_folder=request.source_folder,
             post_action=request.post_action,
             archive_folder=request.archive_folder,
             embedding_model=request.embedding_model,
-            rebuild_mode=request.rebuild_mode
+            rebuild_mode=request.rebuild_mode,
+            team_id=team_id  # v3.0: チームID指定
         )
 
         if request.rebuild_mode:
@@ -372,12 +691,30 @@ async def ingest_notes_endpoint(request: IngestRequest):
 
 
 @app.get("/notes/{note_id}", response_model=NoteResponse)
-async def get_note(note_id: str):
-    """実験ノートを取得"""
+async def get_note(req_obj: Request, note_id: str):
+    """実験ノートを取得（v3.0: マルチテナント対応）"""
     try:
-        # ノートファイルを検索（notes_new, notes_processed または notes_archive から）
+        # チームIDを取得（v3.0）
+        team_id = getattr(req_obj.state, 'team_id', None)
+
+        # ノートファイルを検索（v3.0: チーム対応）
         note_file = None
-        for folder in [config.NOTES_NEW_FOLDER, config.NOTES_PROCESSED_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
+        if team_id:
+            # マルチテナントモード: チーム専用パスから検索
+            folders = [
+                storage.get_team_path(team_id, 'notes_new'),
+                storage.get_team_path(team_id, 'notes_processed'),
+                f"{storage.get_team_path(team_id, 'notes_new')}/archive"
+            ]
+        else:
+            # 後方互換性: グローバルパスから検索
+            folders = [
+                config.NOTES_NEW_FOLDER,
+                config.NOTES_PROCESSED_FOLDER,
+                config.NOTES_ARCHIVE_FOLDER
+            ]
+
+        for folder in folders:
             potential_file = f"{folder}/{note_id}.md"
             try:
                 # storage抽象化レイヤーを使用してファイルの存在確認
@@ -426,10 +763,15 @@ async def get_note(note_id: str):
 
 
 @app.post("/ingest/analyze", response_model=AnalyzeResponse)
-async def analyze_new_terms(request: AnalyzeRequest):
-    """新出単語を分析"""
+async def analyze_new_terms(req_obj: Request, request: AnalyzeRequest):
+    """新出単語を分析（v3.0: マルチテナント対応）"""
     try:
-        dict_manager = get_dictionary_manager()
+        # チームIDを取得（v3.0）
+        team_id = req_obj.headers.get("X-Team-ID")
+        user_id = req_obj.state.user["uid"]
+
+        # チーム専用の辞書マネージャーを初期化
+        dict_manager = get_dictionary_manager(team_id=team_id)
         extractor = TermExtractor(dict_manager, request.openai_api_key)
 
         all_new_terms = []
@@ -438,10 +780,25 @@ async def analyze_new_terms(request: AnalyzeRequest):
         note_contents = request.note_contents
         if not note_contents or len(note_contents) == 0:
             note_contents = []
+
+            # フォルダリストを決定（v3.0: チーム対応）
+            if team_id:
+                folders = [
+                    storage.get_team_path(team_id, 'notes_new'),
+                    storage.get_team_path(team_id, 'notes_processed'),
+                    f"{storage.get_team_path(team_id, 'notes_new')}/archive"
+                ]
+            else:
+                folders = [
+                    config.NOTES_NEW_FOLDER,
+                    config.NOTES_PROCESSED_FOLDER,
+                    config.NOTES_ARCHIVE_FOLDER
+                ]
+
             for note_id in request.note_ids:
                 # ノートファイルを検索
                 note_file = None
-                for folder in [config.NOTES_NEW_FOLDER, config.NOTES_PROCESSED_FOLDER, config.NOTES_ARCHIVE_FOLDER]:
+                for folder in folders:
                     potential_file = f"{folder}/{note_id}.md"
                     try:
                         content = storage.read_file(potential_file)
@@ -474,10 +831,16 @@ async def analyze_new_terms(request: AnalyzeRequest):
 
 
 @app.get("/dictionary", response_model=DictionaryResponse)
-async def get_dictionary():
-    """正規化辞書の全エントリを取得"""
+async def get_dictionary(request: Request):
+    """正規化辞書の全エントリを取得（チーム専用）"""
     try:
-        dict_manager = get_dictionary_manager()
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        # チームメンバーシップ検証（ミドルウェアで実施済み）
+        # ここではteam_idでDictionaryManagerを初期化
+        dict_manager = get_dictionary_manager(team_id=team_id)
         entries = dict_manager.get_all_entries()
 
         return DictionaryResponse(
@@ -491,10 +854,14 @@ async def get_dictionary():
 
 
 @app.post("/dictionary/update", response_model=DictionaryUpdateResponse)
-async def update_dictionary(request: DictionaryUpdateRequest):
-    """正規化辞書を更新"""
+async def update_dictionary(http_request: Request, request: DictionaryUpdateRequest):
+    """正規化辞書を更新（チーム専用）"""
     try:
-        dict_manager = get_dictionary_manager()
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = http_request.headers.get("X-Team-ID")
+        user_id = http_request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
         updated_count = 0
 
         for update in request.updates:
@@ -533,10 +900,14 @@ async def update_dictionary(request: DictionaryUpdateRequest):
 
 
 @app.get("/dictionary/export")
-async def export_dictionary(format: str = "yaml"):
-    """正規化辞書をエクスポート"""
+async def export_dictionary(request: Request, format: str = "yaml"):
+    """正規化辞書をエクスポート（チーム専用）"""
     try:
-        dict_manager = get_dictionary_manager()
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
 
         if format == "json":
             content = dict_manager.export_to_json()
@@ -547,8 +918,10 @@ async def export_dictionary(format: str = "yaml"):
             media_type = "text/csv"
             filename = "dictionary.csv"
         else:  # yaml
-            with open(config.MASTER_DICTIONARY_PATH, 'r', encoding='utf-8') as f:
-                content = f.read()
+            # ファイルが存在しない場合は空の辞書を作成
+            if not storage.exists(dict_manager.dictionary_path):
+                dict_manager.save()
+            content = storage.read_file(dict_manager.dictionary_path)
             media_type = "text/yaml"
             filename = "dictionary.yaml"
 
@@ -564,10 +937,14 @@ async def export_dictionary(format: str = "yaml"):
 
 
 @app.post("/dictionary/import")
-async def import_dictionary(file: UploadFile = File(...)):
-    """正規化辞書をインポート"""
+async def import_dictionary(request: Request, file: UploadFile = File(...)):
+    """正規化辞書をインポート（チーム専用）"""
     try:
-        dict_manager = get_dictionary_manager()
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
         content = await file.read()
         content_str = content.decode('utf-8')
 
@@ -591,6 +968,93 @@ async def import_dictionary(file: UploadFile = File(...)):
     except Exception as e:
         print(f"Error in import_dictionary: {str(e)}")
         raise HTTPException(status_code=500, detail=f"辞書インポートエラー: {str(e)}")
+
+
+@app.put("/dictionary/entry", response_model=DictionaryEditResponse)
+async def edit_dictionary_entry(request: Request, edit_request: DictionaryEditRequest):
+    """辞書エントリを編集（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
+
+        # 既存エントリを検索
+        entry = dict_manager.find_entry_by_canonical(edit_request.canonical)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"エントリが見つかりません: {edit_request.canonical}")
+
+        # 正規化名の変更がある場合
+        if edit_request.new_canonical and edit_request.new_canonical != edit_request.canonical:
+            # 新しい正規化名が既に存在しないか確認
+            existing = dict_manager.find_entry_by_canonical(edit_request.new_canonical)
+            if existing:
+                raise HTTPException(status_code=400, detail=f"正規化名が既に存在します: {edit_request.new_canonical}")
+
+            # 古いエントリを削除して新しいエントリを作成
+            variants = edit_request.variants if edit_request.variants is not None else entry.variants
+            category = edit_request.category if edit_request.category is not None else entry.category
+            note = edit_request.note if edit_request.note is not None else entry.note
+
+            dict_manager.delete_entry(edit_request.canonical)
+            dict_manager.add_entry(
+                canonical=edit_request.new_canonical,
+                variants=variants,
+                category=category,
+                note=note
+            )
+        else:
+            # 正規化名は変更せず、他のフィールドを更新
+            success = dict_manager.update_entry(
+                canonical=edit_request.canonical,
+                variants=edit_request.variants,
+                category=edit_request.category,
+                note=edit_request.note
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail="エントリの更新に失敗しました")
+
+        return DictionaryEditResponse(
+            success=True,
+            message="エントリを更新しました"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in edit_dictionary_entry: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"エントリ編集エラー: {str(e)}")
+
+
+@app.delete("/dictionary/entry", response_model=DictionaryDeleteResponse)
+async def delete_dictionary_entry(request: Request, delete_request: DictionaryDeleteRequest):
+    """辞書エントリを削除（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
+
+        # エントリが存在するか確認
+        entry = dict_manager.find_entry_by_canonical(delete_request.canonical)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"エントリが見つかりません: {delete_request.canonical}")
+
+        # エントリを削除
+        success = dict_manager.delete_entry(delete_request.canonical)
+        if not success:
+            raise HTTPException(status_code=500, detail="エントリの削除に失敗しました")
+
+        return DictionaryDeleteResponse(
+            success=True,
+            message=f"エントリを削除しました: {delete_request.canonical}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in delete_dictionary_entry: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"エントリ削除エラー: {str(e)}")
 
 
 @app.post("/history", response_model=HistoryResponse)
@@ -736,9 +1200,12 @@ async def import_test_cases(file: UploadFile = File(...)):
 
 
 @app.post("/evaluate", response_model=EvaluateResponse)
-async def evaluate_rag(request: EvaluateRequest):
-    """RAG性能を評価"""
+async def evaluate_rag(req_obj: Request, request: EvaluateRequest):
+    """RAG性能を評価（v3.0: マルチテナント対応）"""
     try:
+        # チームIDを取得（v3.0）
+        team_id = getattr(req_obj.state, 'team_id', None)
+
         evaluator = get_evaluator()
 
         # テストケースを取得
@@ -751,7 +1218,8 @@ async def evaluate_rag(request: EvaluateRequest):
             openai_api_key=request.openai_api_key,
             cohere_api_key=request.cohere_api_key,
             embedding_model=request.embedding_model,
-            llm_model=request.llm_model
+            llm_model=request.llm_model,
+            team_id=team_id  # v3.0: チームID指定
         )
 
         input_data = {
@@ -798,9 +1266,12 @@ async def evaluate_rag(request: EvaluateRequest):
 
 
 @app.post("/evaluate/batch", response_model=BatchEvaluateResponse)
-async def batch_evaluate_rag(request: BatchEvaluateRequest):
-    """バッチ評価"""
+async def batch_evaluate_rag(req_obj: Request, request: BatchEvaluateRequest):
+    """バッチ評価（v3.0: マルチテナント対応）"""
     try:
+        # チームIDを取得（v3.0）
+        team_id = getattr(req_obj.state, 'team_id', None)
+
         evaluator = get_evaluator()
         results = []
 
@@ -816,7 +1287,8 @@ async def batch_evaluate_rag(request: BatchEvaluateRequest):
                 openai_api_key=request.openai_api_key,
                 cohere_api_key=request.cohere_api_key,
                 embedding_model=request.embedding_model,
-                llm_model=request.llm_model
+                llm_model=request.llm_model,
+                team_id=team_id  # v3.0: チームID指定
             )
 
             input_data = {
@@ -861,8 +1333,7 @@ async def batch_evaluate_rag(request: BatchEvaluateRequest):
 
 # === Prompt Management Endpoints ===
 
-# PromptManagerインスタンス
-prompt_manager = PromptManager()
+# PromptManagerは各エンドポイントでチームIDを使って初期化します（マルチテナント対応）
 
 
 class SavePromptRequest(BaseModel):
@@ -878,9 +1349,14 @@ class UpdatePromptRequest(BaseModel):
 
 
 @app.get("/prompts/list")
-async def list_prompts():
-    """保存されているプロンプトの一覧を取得"""
+async def list_prompts(request: Request):
+    """保存されているプロンプトの一覧を取得（チーム専用）"""
     try:
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        prompt_manager = PromptManager(team_id=team_id)
         prompts = prompt_manager.list_prompts()
         return {
             "success": True,
@@ -893,9 +1369,14 @@ async def list_prompts():
 
 
 @app.post("/prompts/save")
-async def save_prompt(request: SavePromptRequest):
-    """プロンプトをYAMLファイルとして保存"""
+async def save_prompt(http_request: Request, request: SavePromptRequest):
+    """プロンプトをYAMLファイルとして保存（チーム専用）"""
     try:
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = http_request.headers.get("X-Team-ID")
+        user_id = http_request.state.user["uid"]
+
+        prompt_manager = PromptManager(team_id=team_id)
         result = prompt_manager.save_prompt(
             name=request.name,
             prompts=request.prompts,
@@ -915,9 +1396,14 @@ async def save_prompt(request: SavePromptRequest):
 
 
 @app.get("/prompts/load/{name}")
-async def load_prompt(name: str):
-    """プロンプトをYAMLファイルから読み込み"""
+async def load_prompt(request: Request, name: str):
+    """プロンプトをYAMLファイルから読み込み（チーム専用）"""
     try:
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        prompt_manager = PromptManager(team_id=team_id)
         data = prompt_manager.load_prompt(name)
 
         if not data:
@@ -936,9 +1422,14 @@ async def load_prompt(name: str):
 
 
 @app.delete("/prompts/delete/{name}")
-async def delete_prompt(name: str):
-    """プロンプトを削除"""
+async def delete_prompt(request: Request, name: str):
+    """プロンプトを削除（チーム専用）"""
     try:
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        prompt_manager = PromptManager(team_id=team_id)
         result = prompt_manager.delete_prompt(name)
 
         if not result["success"]:
@@ -954,9 +1445,14 @@ async def delete_prompt(name: str):
 
 
 @app.put("/prompts/update")
-async def update_prompt(request: UpdatePromptRequest):
-    """プロンプトを更新"""
+async def update_prompt(http_request: Request, request: UpdatePromptRequest):
+    """プロンプトを更新（チーム専用）"""
     try:
+        # チームIDの取得と検証（ミドルウェアで検証済み）
+        team_id = http_request.headers.get("X-Team-ID")
+        user_id = http_request.state.user["uid"]
+
+        prompt_manager = PromptManager(team_id=team_id)
         result = prompt_manager.update_prompt(
             name=request.name,
             prompts=request.prompts,
@@ -1044,12 +1540,16 @@ async def reset_chroma_db_endpoint():
 if __name__ == "__main__":
     import uvicorn
 
+    # Cloud Run環境ではPORT環境変数を使用、ローカルではデフォルトで8000
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+
     print("🚀 実験ノート検索システム API サーバー起動中...")
-    print("📍 Server: http://localhost:8000")
-    print("📚 API Docs: http://localhost:8000/docs")
+    print(f"📍 Server: http://localhost:{port}")
+    print(f"📚 API Docs: http://localhost:{port}/docs")
     print("🔧 Phase 4: 履歴・評価機能実装中\n")
 
     # 必要なフォルダを作成
     config.ensure_folders()
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=host, port=port)

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Button from '@/components/Button';
 import { api, DictionaryUpdateRequest } from '@/lib/api';
 import { storage } from '@/lib/storage';
+import { useAuth } from '@/lib/auth-context';
 
 interface NewTerm {
   term: string;
@@ -25,14 +26,18 @@ interface NewTerm {
 }
 
 export default function IngestPage() {
+  const { idToken, currentTeamId } = useAuth();
   const [sourceFolder, setSourceFolder] = useState('');
   const [postAction, setPostAction] = useState<'delete' | 'archive' | 'keep' | 'move_to_processed'>('move_to_processed');
   const [archiveFolder, setArchiveFolder] = useState('');
   const [loading, setLoading] = useState(false);
   const [rebuildLoading, setRebuildLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [uploadError, setUploadError] = useState('');
   const [ingestResult, setIngestResult] = useState<{
     new_notes: string[];
     skipped_notes: string[];
@@ -60,7 +65,7 @@ export default function IngestPage() {
         post_action: postAction,
         archive_folder: archiveFolder || undefined,
         embedding_model: embeddingModel || undefined,
-      });
+      }, idToken, currentTeamId);
 
       if (response.success) {
         setIngestResult({
@@ -108,7 +113,7 @@ export default function IngestPage() {
         archive_folder: undefined,
         embedding_model: embeddingModel || undefined,
         rebuild_mode: true,
-      });
+      }, idToken, currentTeamId);
 
       if (response.success) {
         setIngestResult({
@@ -124,6 +129,31 @@ export default function IngestPage() {
     }
   };
 
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setUploadError('');
+    setUploadSuccess('');
+    setUploadLoading(true);
+
+    try {
+      const response = await api.uploadNotes(files, idToken, currentTeamId);
+
+      if (response.success) {
+        setUploadSuccess(`${response.uploaded_files.length}件のファイルをアップロードしました: ${response.uploaded_files.join(', ')}`);
+        // ファイル入力をリセット
+        event.target.value = '';
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'ファイルのアップロードに失敗しました');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
   const handleAnalyze = async (noteIds: string[]) => {
     setError('');
     setAnalyzing(true);
@@ -134,18 +164,27 @@ export default function IngestPage() {
         throw new Error('OpenAI APIキーが設定されていません');
       }
 
-      // ノートの内容を取得（実際には、取り込み時に既に読み込まれているはずだが、ここでは再取得）
-      // 簡略化のため、ダミーコンテンツを使用（実際の実装では、ノートファイルを読み込む必要がある）
-      const noteContents = noteIds.map(() => '## 材料\n- サンプル材料A\n- サンプル材料B');
-
+      // バックエンドがnote_idsから自動的にファイルを読み込むため、空配列を送信
+      // （バックエンドのserver.py lines 756-772参照）
       const response = await api.analyzeNewTerms({
         note_ids: noteIds,
-        note_contents: noteContents,
+        note_contents: [],  // 空配列 → バックエンドが実ファイルから読み込む
         openai_api_key: openaiApiKey,
-      });
+      }, idToken, currentTeamId);
 
       if (response.success) {
-        setNewTerms(response.new_terms.map(term => ({
+        // 重複を除去：同じtermを持つエントリーを1つにまとめる
+        const uniqueTermsMap = new Map<string, typeof response.new_terms[0]>();
+
+        for (const term of response.new_terms) {
+          if (!uniqueTermsMap.has(term.term)) {
+            uniqueTermsMap.set(term.term, term);
+          }
+        }
+
+        const uniqueTerms = Array.from(uniqueTermsMap.values());
+
+        setNewTerms(uniqueTerms.map(term => ({
           ...term,
           user_decision: term.llm_suggestion.decision, // LLMの提案をデフォルト値に
           user_canonical: term.llm_suggestion.suggested_canonical,
@@ -187,7 +226,7 @@ export default function IngestPage() {
         return;
       }
 
-      const response = await api.updateDictionary({ updates });
+      const response = await api.updateDictionary({ updates }, idToken, currentTeamId);
 
       if (response.success) {
         setSuccess(`${response.updated_entries}件の用語を辞書に追加しました`);
@@ -232,6 +271,52 @@ export default function IngestPage() {
           <Button onClick={handleRebuild} disabled={rebuildLoading || loading || analyzing}>
             {rebuildLoading ? '再構築中...' : 'ChromaDBを再構築'}
           </Button>
+        </div>
+
+        {/* ファイルアップロードセクション */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+          <h2 className="text-xl font-bold mb-4">📤 ファイルアップロード</h2>
+          <p className="text-sm text-gray-700 mb-4">
+            Markdownファイル(.md)を選択してアップロードしてください。
+            アップロードされたファイルは自動的にnotes/newフォルダに保存されます。
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <input
+                type="file"
+                accept=".md"
+                multiple
+                onChange={handleUpload}
+                disabled={uploadLoading || loading || analyzing}
+                className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                複数ファイルを同時に選択できます。Markdownファイル(.md)のみアップロード可能です。
+              </p>
+            </div>
+
+            {uploadLoading && (
+              <div className="flex items-center gap-2 text-primary">
+                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>アップロード中...</span>
+              </div>
+            )}
+
+            {uploadError && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                {uploadError}
+              </div>
+            )}
+            {uploadSuccess && (
+              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                {uploadSuccess}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 設定フォーム */}

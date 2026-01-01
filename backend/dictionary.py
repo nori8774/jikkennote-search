@@ -18,7 +18,7 @@ from difflib import SequenceMatcher
 from dataclasses import dataclass, asdict
 from io import StringIO
 
-import config
+from config import config
 from storage import storage
 
 
@@ -52,12 +52,22 @@ class NormalizationEntry:
 class DictionaryManager:
     """正規化辞書マネージャー"""
 
-    def __init__(self, dictionary_path: Optional[str] = None):
+    def __init__(self, team_id: Optional[str] = None, dictionary_path: Optional[str] = None):
         """
         Args:
-            dictionary_path: 辞書ファイルのパス（デフォルト: config.MASTER_DICTIONARY_PATH）
+            team_id: チームID（マルチテナント対応）
+            dictionary_path: 辞書ファイルのパス（デフォルト: チームディレクトリまたはconfig.MASTER_DICTIONARY_PATH）
         """
-        self.dictionary_path = dictionary_path or config.MASTER_DICTIONARY_PATH
+        if dictionary_path:
+            self.dictionary_path = dictionary_path
+        elif team_id:
+            # チーム専用の辞書パス
+            self.dictionary_path = f"teams/{team_id}/master_dictionary.yaml"
+        else:
+            # デフォルトパス（後方互換性のため）
+            self.dictionary_path = config.MASTER_DICTIONARY_PATH
+
+        self.team_id = team_id
         self.entries: List[NormalizationEntry] = []
         self.load()
 
@@ -499,13 +509,14 @@ class DictionaryManager:
         }
 
 
-# グローバルインスタンス（シングルトン）
-_dictionary_manager = None
+def get_dictionary_manager(team_id: Optional[str] = None) -> DictionaryManager:
+    """
+    辞書マネージャーのインスタンスを取得
 
+    Args:
+        team_id: チームID（マルチテナント対応）
 
-def get_dictionary_manager() -> DictionaryManager:
-    """辞書マネージャーのシングルトンインスタンスを取得"""
-    global _dictionary_manager
-    if _dictionary_manager is None:
-        _dictionary_manager = DictionaryManager()
-    return _dictionary_manager
+    Returns:
+        DictionaryManagerインスタンス
+    """
+    return DictionaryManager(team_id=team_id)

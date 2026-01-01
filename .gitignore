@@ -1,1 +1,10 @@
 env.yaml
+
+# Firebase credentials
+backend/firebase-adminsdk.json
+firebase-adminsdk.json
+
+# Environment variables
+.env.local
+.env
+.vercel

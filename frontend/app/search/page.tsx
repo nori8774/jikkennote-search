@@ -3,12 +3,14 @@
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
+import { useAuth } from '@/lib/auth-context';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
 export default function SearchPage() {
+  const { idToken, currentTeamId } = useAuth();
   const [purpose, setPurpose] = useState('');
   const [materials, setMaterials] = useState('');
   const [methods, setMethods] = useState('');
@@ -49,7 +51,7 @@ export default function SearchPage() {
         embedding_model: storage.getEmbeddingModel() || undefined,
         llm_model: storage.getLLMModel() || undefined,
         custom_prompts: storage.getCustomPrompts() || undefined,
-      });
+      }, idToken, currentTeamId);
 
       setResult(response);
 

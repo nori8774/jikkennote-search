@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import Header from '@/components/Header';
+import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: '実験ノート検索システム',
@@ -15,8 +16,10 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body>
-        <Header />
-        {children}
+        <Providers>
+          <Header />
+          {children}
+        </Providers>
       </body>
     </html>
   );

@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import uuid
 
-import config
+from config import config
 
 
 @dataclass

@@ -19,9 +19,9 @@ echo "リージョン: $REGION"
 echo "イメージ: $IMAGE_NAME"
 echo ""
 
-# ステップ1: Dockerイメージのビルド
+# ステップ1: Dockerイメージのビルド（Cloud Run用にamd64プラットフォームを指定）
 echo "ステップ1: Dockerイメージをビルド中..."
-docker build -t $IMAGE_NAME ./backend
+docker build --platform linux/amd64 -t $IMAGE_NAME ./backend
 echo "✅ ビルド完了"
 echo ""
 
@@ -31,8 +31,16 @@ docker push $IMAGE_NAME
 echo "✅ プッシュ完了"
 echo ""
 
-# ステップ3: Cloud Runにデプロイ
+# ステップ3: Cloud Runにデプロイ（マルチテナント対応）
 echo "ステップ3: Cloud Runにデプロイ中..."
+
+# 環境変数YAMLファイルを作成
+cat > /tmp/deploy-env-vars.yaml <<EOF
+CORS_ORIGINS: "https://jikkennote-search-v2.vercel.app,http://localhost:3000"
+STORAGE_TYPE: "gcs"
+GCS_BUCKET_NAME: "jikkennote-storage"
+EOF
+
 gcloud run deploy jikkennote-backend \
     --image=$IMAGE_NAME \
     --platform=managed \
@@ -43,7 +51,8 @@ gcloud run deploy jikkennote-backend \
     --cpu=2 \
     --timeout=300 \
     --max-instances=10 \
-    --set-env-vars="HOST=0.0.0.0,PORT=8000,CORS_ORIGINS=http://localhost:3000" \
+    --env-vars-file=/tmp/deploy-env-vars.yaml \
+    --service-account=jikkennote-backend@${PROJECT_ID}.iam.gserviceaccount.com \
     --project=$PROJECT_ID
 echo ""
 echo "✅ デプロイ完了"
@@ -74,10 +83,12 @@ echo "   - https://vercel.com/ でプロジェクトをインポート"
 echo "   - Root Directory: frontend"
 echo "   - 環境変数: NEXT_PUBLIC_API_URL=$BACKEND_URL"
 echo ""
-echo "2. Vercelデプロイ後、CORS設定を更新"
+echo "2. Vercelデプロイ後、CORS設定を更新（既に設定済み）"
+echo "   現在のCORS設定: https://jikkennote-search-v2.vercel.app,http://localhost:3000"
+echo "   別のURLを追加する場合:"
 echo "   gcloud run services update jikkennote-backend \\"
 echo "       --region=$REGION \\"
-echo "       --update-env-vars=\"CORS_ORIGINS=https://YOUR-VERCEL-URL.vercel.app,http://localhost:3000\" \\"
+echo "       --update-env-vars=\"CORS_ORIGINS=https://jikkennote-search-v2.vercel.app,http://localhost:3000\" \\"
 echo "       --project=$PROJECT_ID"
 echo ""
 echo "3. 動作確認"

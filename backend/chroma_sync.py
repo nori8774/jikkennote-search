@@ -54,6 +54,13 @@ def sync_chroma_from_gcs(local_chroma_path: str = None):
         with tarfile.open(tmp_path, 'r:gz') as tar:
             tar.extractall(Path(local_chroma_path).parent)
 
+        # パーミッションを修正（書き込み可能に）
+        for root, dirs, files in os.walk(local_chroma_path):
+            for d in dirs:
+                os.chmod(os.path.join(root, d), 0o755)
+            for f in files:
+                os.chmod(os.path.join(root, f), 0o644)
+
         # 一時ファイルを削除
         os.remove(tmp_path)
 
@@ -210,6 +217,9 @@ def get_chroma_vectorstore(embeddings, collection_name: str = "experiment_notes"
 
     Returns:
         Chroma vectorstore
+
+    Note:
+        v3.0: 後方互換性のため維持。新規実装では get_team_chroma_vectorstore() を使用。
     """
     from langchain_chroma import Chroma
 
@@ -226,6 +236,8 @@ def get_chroma_vectorstore(embeddings, collection_name: str = "experiment_notes"
             # モデルが変更された場合（警告は呼び出し側で行う）
             print(f"⚠️  警告: embeddingモデルが変更されました: {current_model} -> {embedding_model}")
             print("   既存のベクトルDBとの互換性がなくなる可能性があります")
+            # 新しいモデルを保存
+            save_embedding_model_config(embedding_model)
 
     # Chromaインスタンスを作成
     vectorstore = Chroma(
@@ -233,5 +245,69 @@ def get_chroma_vectorstore(embeddings, collection_name: str = "experiment_notes"
         embedding_function=embeddings,
         persist_directory=config.CHROMA_DB_FOLDER
     )
+
+    return vectorstore
+
+
+def get_team_chroma_vectorstore(team_id: str, embeddings, embedding_model: str = None):
+    """
+    チームごとのChromaDBベクトルストアを取得（v3.0新規）
+
+    Args:
+        team_id: チームID
+        embeddings: Embedding関数
+        embedding_model: 使用するembeddingモデル名（設定保存用）
+
+    Returns:
+        Chroma vectorstore
+
+    Note:
+        - コレクション名: `notes_{team_id}`
+        - persist_directory: `teams/{team_id}/chroma-db`
+    """
+    from langchain_chroma import Chroma
+
+    # チーム専用のコレクション名
+    collection_name = f"notes_{team_id}"
+
+    # チーム専用のpersist_directory
+    team_chroma_path = storage.get_team_path(team_id, 'chroma')
+
+    # ディレクトリが存在しない場合は作成
+    Path(team_chroma_path).mkdir(parents=True, exist_ok=True)
+
+    # Chromaインスタンスを作成
+    vectorstore = Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=team_chroma_path
+    )
+
+    # embedding モデル設定を保存（チームごとに管理）
+    if embedding_model:
+        # チーム専用の設定ファイルパス
+        config_path = Path(team_chroma_path) / "chroma_db_config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    team_config = json.load(f)
+                    current_model = team_config.get('embedding_model')
+
+                    if current_model and current_model != embedding_model:
+                        print(f"⚠️  警告: チーム {team_id} のembeddingモデルが変更されました: {current_model} -> {embedding_model}")
+            else:
+                # 初回作成時
+                team_config = {}
+
+            team_config['embedding_model'] = embedding_model
+            team_config['updated_at'] = datetime.now().isoformat()
+
+            with open(config_path, 'w') as f:
+                json.dump(team_config, f, indent=2)
+
+        except Exception as e:
+            print(f"警告: チーム設定の保存に失敗: {e}")
 
     return vectorstore

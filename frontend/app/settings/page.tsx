@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import Button from '@/components/Button';
+import { useAuth } from '@/lib/auth-context';
 
 interface SavedPrompt {
   id: string;
@@ -14,6 +15,7 @@ interface SavedPrompt {
 }
 
 export default function SettingsPage() {
+  const { idToken, currentTeamId, loading } = useAuth();
   const [openaiKey, setOpenaiKey] = useState('');
   const [cohereKey, setCohereKey] = useState('');
   const [embeddingModel, setEmbeddingModel] = useState('text-embedding-3-small');
@@ -46,6 +48,7 @@ export default function SettingsPage() {
   const [googleDriveFolderId, setGoogleDriveFolderId] = useState('');
   const [googleDriveCredentialsPath, setGoogleDriveCredentialsPath] = useState('');
 
+  // ローカルストレージと認証不要APIの読み込み（初回のみ）
   useEffect(() => {
     // localStorageから設定を読み込む
     setOpenaiKey(storage.getOpenAIApiKey() || '');
@@ -61,19 +64,12 @@ export default function SettingsPage() {
     setGoogleDriveFolderId(storage.getGoogleDriveFolderId() || '');
     setGoogleDriveCredentialsPath(storage.getGoogleDriveCredentialsPath() || '');
 
-    // 保存済みプロンプト一覧をバックエンドから読み込む
-    api.listSavedPrompts().then((res) => {
-      if (res.success) {
-        setSavedPromptsList(res.prompts || []);
-      }
-    }).catch(console.error);
-
-    // デフォルトプロンプトを取得
+    // デフォルトプロンプトを取得（認証不要）
     api.getDefaultPrompts().then((res) => {
       setDefaultPrompts(res.prompts);
     }).catch(console.error);
 
-    // ChromaDB情報を取得
+    // ChromaDB情報を取得（認証不要）
     api.getChromaInfo().then((res) => {
       if (res.success) {
         setChromaDBInfo({
@@ -84,6 +80,17 @@ export default function SettingsPage() {
       }
     }).catch(console.error);
   }, []);
+
+  // 認証情報が揃ったらプロンプトリストを取得
+  useEffect(() => {
+    if (!loading && idToken && currentTeamId) {
+      api.listSavedPrompts(idToken, currentTeamId).then((res) => {
+        if (res.success) {
+          setSavedPromptsList(res.prompts || []);
+        }
+      }).catch(console.error);
+    }
+  }, [loading, idToken, currentTeamId]);
 
   const handleSave = () => {
     // 保存前のEmbeddingモデルの値を保存（localStorageから取得）
@@ -185,6 +192,12 @@ export default function SettingsPage() {
       return;
     }
 
+    // 認証情報の確認
+    if (!idToken || !currentTeamId) {
+      setSaveError('認証情報が取得できていません。ページを再読み込みしてください。');
+      return;
+    }
+
     try {
       // 現在のプロンプトを保存
       const promptsToSave = {
@@ -192,7 +205,7 @@ export default function SettingsPage() {
         compare: customPrompts['compare'] || defaultPrompts?.compare?.prompt || ''
       };
 
-      const result = await api.savePrompt(savePromptName, promptsToSave, savePromptDescription);
+      const result = await api.savePrompt(savePromptName, promptsToSave, savePromptDescription, idToken, currentTeamId);
 
       if (!result.success) {
         setSaveError(result.error || '保存に失敗しました。');
@@ -200,7 +213,7 @@ export default function SettingsPage() {
       }
 
       // 保存成功 - リストを再読み込み
-      const listRes = await api.listSavedPrompts();
+      const listRes = await api.listSavedPrompts(idToken, currentTeamId);
       if (listRes.success) {
         setSavedPromptsList(listRes.prompts || []);
       }
@@ -213,20 +226,29 @@ export default function SettingsPage() {
 
   const handleRestorePrompt = async (id: string) => {
     try {
-      const result = await api.loadPrompt(id);
-      if (!result.success || !result.prompts) {
+      const result = await api.loadPrompt(id, idToken, currentTeamId);
+      console.log('🔍 Load prompt result:', result);
+
+      if (!result.success || !result.prompt) {
+        console.error('❌ Prompt not found or invalid response');
         alert('プロンプトが見つかりません。');
         return;
       }
 
-      if (confirm(`プロンプト「${result.name}」を復元しますか？現在の編集内容は上書きされます。`)) {
-        setCustomPrompts({
-          query_generation: result.prompts.query_generation || '',
-          compare: result.prompts.compare || ''
-        });
-        alert(`プロンプト「${result.name}」を復元しました。「設定を保存」ボタンをクリックして適用してください。`);
+      console.log('✅ Prompt data:', result.prompt);
+      console.log('📝 Prompts field:', result.prompt.prompts);
+
+      if (confirm(`プロンプト「${result.prompt.name}」を復元しますか？現在の編集内容は上書きされます。`)) {
+        const newPrompts = {
+          query_generation: result.prompt.prompts.query_generation || '',
+          compare: result.prompt.prompts.compare || ''
+        };
+        console.log('🔄 Setting custom prompts:', newPrompts);
+        setCustomPrompts(newPrompts);
+        alert(`プロンプト「${result.prompt.name}」を復元しました。「設定を保存」ボタンをクリックして適用してください。`);
       }
     } catch (error) {
+      console.error('❌ Restore error:', error);
       alert(`復元エラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
     }
   };
@@ -234,10 +256,10 @@ export default function SettingsPage() {
   const handleDeleteSavedPrompt = async (id: string, name: string) => {
     if (confirm(`プロンプト「${name}」を削除しますか？この操作は元に戻せません。`)) {
       try {
-        const result = await api.deletePrompt(id);
+        const result = await api.deletePrompt(id, idToken, currentTeamId);
         if (result.success) {
           // リストを再読み込み
-          const listRes = await api.listSavedPrompts();
+          const listRes = await api.listSavedPrompts(idToken, currentTeamId);
           if (listRes.success) {
             setSavedPromptsList(listRes.prompts || []);
           }
@@ -484,50 +506,59 @@ export default function SettingsPage() {
               </div>
 
               {/* 保存済みプロンプト一覧 */}
-              {savedPromptsList.length > 0 && (
-                <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
-                  <h3 className="font-bold mb-3">
-                    保存済みプロンプト ({savedPromptsList.length}/50)
-                  </h3>
-                  <div className="space-y-2">
-                    {savedPromptsList.map((prompt) => (
-                      <div
-                        key={prompt.id}
-                        className="bg-white border border-gray-200 rounded p-3 flex justify-between items-start"
-                      >
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-sm">{prompt.name}</h4>
-                          {prompt.description && (
-                            <p className="text-xs text-gray-600 mt-1">
-                              {prompt.description}
+              <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
+                <h3 className="font-bold mb-3">
+                  保存済みプロンプト ({savedPromptsList.length}/50)
+                </h3>
+                {savedPromptsList.length > 0 ? (
+                  <>
+                    <div className="space-y-2">
+                      {savedPromptsList.map((prompt) => (
+                        <div
+                          key={prompt.id}
+                          className="bg-white border border-gray-200 rounded p-3 flex justify-between items-start"
+                        >
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-sm">{prompt.name}</h4>
+                            {prompt.description && (
+                              <p className="text-xs text-gray-600 mt-1">
+                                {prompt.description}
+                              </p>
+                            )}
+                            <p className="text-xs text-gray-500 mt-1">
+                              更新日: {new Date(prompt.updated_at).toLocaleString('ja-JP')}
                             </p>
-                          )}
-                          <p className="text-xs text-gray-500 mt-1">
-                            更新日: {new Date(prompt.updated_at).toLocaleString('ja-JP')}
-                          </p>
+                          </div>
+                          <div className="flex gap-2 ml-4">
+                            <button
+                              onClick={() => handleRestorePrompt(prompt.id)}
+                              className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 border border-blue-600 rounded hover:bg-blue-50"
+                              title="このプロンプトを復元して現在の設定に適用します"
+                            >
+                              復元
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSavedPrompt(prompt.id, prompt.name)}
+                              className="text-xs text-red-600 hover:text-red-800 px-2 py-1 border border-red-600 rounded hover:bg-red-50"
+                              title="このプロンプトを削除します（元に戻せません）"
+                            >
+                              削除
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex gap-2 ml-4">
-                          <button
-                            onClick={() => handleRestorePrompt(prompt.id)}
-                            className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 border border-blue-600 rounded"
-                          >
-                            復元
-                          </button>
-                          <button
-                            onClick={() => handleDeleteSavedPrompt(prompt.id, prompt.name)}
-                            className="text-xs text-red-600 hover:text-red-800 px-2 py-1 border border-red-600 rounded"
-                          >
-                            削除
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-600 mt-3">
-                    残り保存可能数: {50 - savedPromptsList.length}個
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-3">
+                      残り保存可能数: {50 - savedPromptsList.length}個
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-600">
+                    保存されているプロンプトはありません。<br />
+                    「現在のプロンプトを保存」ボタンをクリックして、カスタマイズしたプロンプトを保存できます。
                   </p>
-                </div>
-              )}
+                )}
+              </div>
 
               {Object.entries(defaultPrompts).map(([key, value]: [string, any]) => (
                 <div key={key} className="border border-gray-300 rounded-lg p-4">

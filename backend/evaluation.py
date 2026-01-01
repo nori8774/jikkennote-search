@@ -20,7 +20,7 @@ import math
 import pandas as pd
 from io import StringIO
 
-import config
+from config import config
 
 
 @dataclass
