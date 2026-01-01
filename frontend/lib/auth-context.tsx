@@ -98,17 +98,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 認証状態の監視
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log('🔍 onAuthStateChanged triggered:', firebaseUser ? firebaseUser.email : 'No user');
       setUser(firebaseUser);
 
       if (firebaseUser) {
         try {
+          console.log('✅ User logged in, fetching ID token...');
           // ID Token取得
           const token = await firebaseUser.getIdToken();
           setIdToken(token);
+          console.log('✅ ID token retrieved');
 
           // チーム一覧取得
+          console.log('🔍 Fetching teams...');
           const teamsList = await fetchTeams(token);
           setTeams(teamsList);
+          console.log('✅ Teams fetched:', teamsList.length);
 
           // 現在のチームID復元
           if (teamsList.length > 0) {
@@ -143,10 +148,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async () => {
     const provider = new GoogleAuthProvider();
     try {
+      console.log('🔍 Calling signInWithRedirect...');
       await signInWithRedirect(auth, provider);
-      // リダイレクト後、getRedirectResultとonAuthStateChangedで自動的に処理される
+      console.log('✅ signInWithRedirect called (redirecting to Google...)');
+      // リダイレクト後、onAuthStateChangedで自動的に処理される
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ Login error:', error);
       throw error;
     }
   };

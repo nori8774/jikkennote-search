@@ -11,8 +11,10 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
+    console.log('🔍 LoginPage useEffect:', { user: user?.email, loading });
     // すでにログイン済みの場合は検索ページにリダイレクト
     if (user && !loading) {
+      console.log('✅ Redirecting to /search...');
       router.push('/search');
     }
   }, [user, loading, router]);
