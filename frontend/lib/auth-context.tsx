@@ -4,7 +4,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   User,
   signInWithRedirect,
-  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   GoogleAuthProvider
@@ -98,20 +97,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 認証状態の監視
   useEffect(() => {
-    // リダイレクト結果を処理（リダイレクトから戻ってきた場合のみ）
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result) {
-          console.log('✅ Redirect login successful:', result.user.email);
-        }
-      })
-      .catch((error) => {
-        // auth/popup-closed-by-user などの無害なエラーは無視
-        if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
-          console.error('Redirect result error:', error);
-        }
-      });
-
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
 
