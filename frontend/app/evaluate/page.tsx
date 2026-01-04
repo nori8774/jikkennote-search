@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Button from '@/components/Button';
 import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
+import { useAuth } from '@/lib/auth-context';
 import * as XLSX from 'xlsx';
 
 interface TestCondition {
@@ -33,6 +34,15 @@ interface EvaluationResult {
   ground_truth: { noteId: string; rank: number }[]; // 正解データ (10件)
 }
 
+// v3.1.0: 3軸分離検索設定
+interface MultiAxisSettings {
+  enabled: boolean;
+  fusionMethod: 'rrf' | 'linear';
+  axisWeights: { material: number; method: number; combined: number };
+  rerankPosition: 'per_axis' | 'after_fusion';
+  rerankEnabled: boolean;
+}
+
 interface EvaluationHistory {
   id: string;
   timestamp: Date;
@@ -47,9 +57,12 @@ interface EvaluationHistory {
     recall_10: number;
     mrr: number;
   };
+  // v3.1.0: 3軸分離検索設定
+  multi_axis_settings?: MultiAxisSettings;
 }
 
 export default function EvaluatePage() {
+  const { idToken, currentTeamId } = useAuth();
   const [testConditions, setTestConditions] = useState<TestCondition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -71,6 +84,13 @@ export default function EvaluatePage() {
   const [promptName, setPromptName] = useState('デフォルト');
   const [savedPromptsList, setSavedPromptsList] = useState<any[]>([]);
 
+  // v3.1.0: 3軸分離検索設定
+  const [multiAxisEnabled, setMultiAxisEnabled] = useState(true);
+  const [fusionMethod, setFusionMethod] = useState<'rrf' | 'linear'>('rrf');
+  const [axisWeights, setAxisWeights] = useState({ material: 0.3, method: 0.4, combined: 0.3 });
+  const [rerankPosition, setRerankPosition] = useState<'per_axis' | 'after_fusion'>('after_fusion');
+  const [rerankEnabled, setRerankEnabled] = useState(true);
+
   // 評価用シートのデータを読み込む
   useEffect(() => {
     loadEvaluationData();
@@ -81,14 +101,19 @@ export default function EvaluatePage() {
     setEmbeddingModel(storage.getEmbeddingModel() || 'text-embedding-3-small');
     setLlmModel(storage.getLLMModel() || 'gpt-4o-mini');
     setCustomPrompts(storage.getCustomPrompts() || {});
+  }, []);
 
-    // 保存済みプロンプト一覧をバックエンドから読み込む
-    api.listSavedPrompts().then((res) => {
+  // 保存済みプロンプト一覧をバックエンドから読み込む（認証後）
+  useEffect(() => {
+    if (!idToken || !currentTeamId) return;
+
+    api.listSavedPrompts(idToken, currentTeamId).then((res) => {
       if (res.success) {
         setSavedPromptsList(res.prompts || []);
+        console.log('保存済みプロンプト一覧を読み込みました:', res.prompts?.length || 0, '件');
       }
     }).catch(console.error);
-  }, []);
+  }, [idToken, currentTeamId]);
 
   const loadEvaluationData = async () => {
     try {
@@ -194,11 +219,19 @@ export default function EvaluatePage() {
       custom_prompts: customPrompts,
       results,
       average_metrics: avgMetrics,
+      // v3.1.0: 3軸分離検索設定を記録
+      multi_axis_settings: {
+        enabled: multiAxisEnabled,
+        fusionMethod,
+        axisWeights,
+        rerankPosition,
+        rerankEnabled,
+      },
     };
 
     console.log('保存する履歴データ:', newHistory);
 
-    const updated = [newHistory, ...evaluationHistories].slice(0, 5); // 最新5件のみ保持
+    const updated = [newHistory, ...evaluationHistories].slice(0, 50); // FR-115: 最新50件のみ保持
     setEvaluationHistories(updated);
     localStorage.setItem('evaluation_histories', JSON.stringify(updated));
 
@@ -230,7 +263,7 @@ export default function EvaluatePage() {
         try {
           console.log(`条件 ${condition.条件} を評価中...`);
 
-          // 検索実行（評価モード: 比較省略、Top10返却）
+          // 検索実行（評価モード: 比較省略、Top10返却、v3.1.0: 3軸分離検索対応）
           const searchResponse = await api.search({
             purpose: condition.目的 || '',
             materials: condition.材料 || '',
@@ -242,7 +275,13 @@ export default function EvaluatePage() {
             llm_model: llmModel,
             custom_prompts: customPrompts,
             evaluation_mode: true,  // 評価モードを有効化
-          });
+            // v3.1.0: 3軸分離検索設定
+            multi_axis_enabled: multiAxisEnabled,
+            fusion_method: fusionMethod,
+            axis_weights: axisWeights,
+            rerank_position: rerankPosition,
+            rerank_enabled: rerankEnabled,
+          }, idToken, currentTeamId);
 
           // デバッグログ: 検索レスポンスを確認
           console.log(`条件 ${condition.条件} の検索レスポンス:`, {
@@ -251,10 +290,14 @@ export default function EvaluatePage() {
             first_doc_preview: searchResponse.retrieved_docs?.[0]?.substring(0, 200) || 'なし'
           });
 
-          // 検索結果からノートIDとスコアを抽出（リランキング後の上位10件）
+          // 検索結果からノートIDとスコアを抽出（リランキング後の上位10件、重複除去）
           const candidates: { noteId: string; rank: number; score: number }[] = [];
+          const seenNoteIds = new Set<string>(); // 重複チェック用
           if (searchResponse.retrieved_docs && searchResponse.retrieved_docs.length > 0) {
-            for (let j = 0; j < Math.min(10, searchResponse.retrieved_docs.length); j++) {
+            for (let j = 0; j < searchResponse.retrieved_docs.length; j++) {
+              // 上位10件（重複除去後）に達したら終了
+              if (candidates.length >= 10) break;
+
               const doc = searchResponse.retrieved_docs[j];
               // ノートIDを抽出（バックエンドから返されるフォーマット: 【実験ノートID: ID3-14】）
               const idMatch = doc.match(/【実験ノートID:\s*([ID\d-]+)】/) ||  // 【実験ノートID: ID3-14】
@@ -264,12 +307,19 @@ export default function EvaluatePage() {
 
               if (idMatch) {
                 const noteId = idMatch[1];
-                // スコアは現時点では取得できないため、ランクベースの仮スコアを設定
-                // (将来的にバックエンドからスコアが返される場合は、それを使用)
-                const score = 1.0 - (j * 0.05); // 1位=1.0, 2位=0.95, ...
+                // 重複チェック: 同じノートIDが既に追加されている場合はスキップ
+                if (seenNoteIds.has(noteId)) {
+                  console.log(`条件 ${condition.条件}: 重複ノートID「${noteId}」をスキップ（元順位 ${j+1}）`);
+                  continue;
+                }
+                seenNoteIds.add(noteId);
+
+                // スコアは重複除去後のランクに基づいて設定
+                const rank = candidates.length + 1;
+                const score = 1.0 - ((rank - 1) * 0.05); // 1位=1.0, 2位=0.95, ...
                 candidates.push({
                   noteId: noteId,
-                  rank: j + 1,
+                  rank: rank,
                   score: score,
                 });
               } else {
@@ -445,11 +495,101 @@ export default function EvaluatePage() {
     }
   };
 
+  // FR-115: CSV出力関数（v3.1.0: 3軸分離検索設定カラム追加）
+  const exportToCSV = () => {
+    try {
+      if (evaluationHistories.length === 0) {
+        setError('エクスポートする評価履歴がありません');
+        return;
+      }
+
+      const headers = [
+        '条件ID',
+        'Embeddingモデル',
+        'LLMモデル',
+        'プロンプト名',
+        'nDCG@10',
+        'Precision@10',
+        'Recall@10',
+        'MRR',
+        // v3.1.0: 3軸分離検索設定カラム
+        '3軸検索',
+        '統合方式',
+        '材料ウエイト',
+        '方法ウエイト',
+        '総合ウエイト',
+        'リランク位置',
+        'リランク有効',
+        '実行日時'
+      ];
+
+      const rows: string[][] = [];
+
+      evaluationHistories.forEach((history) => {
+        // v3.1.0: 3軸検索設定を取得（存在しない場合はデフォルト値）
+        const mas = history.multi_axis_settings;
+        const multiAxisStr = mas?.enabled ? '有効' : '無効';
+        const fusionStr = mas?.fusionMethod === 'rrf' ? 'RRF' : (mas?.fusionMethod === 'linear' ? '線形結合' : '-');
+        const materialWeight = mas?.axisWeights?.material?.toFixed(2) || '0.30';
+        const methodWeight = mas?.axisWeights?.method?.toFixed(2) || '0.40';
+        const combinedWeight = mas?.axisWeights?.combined?.toFixed(2) || '0.30';
+        const rerankPosStr = mas?.rerankPosition === 'per_axis' ? '各軸後' : (mas?.rerankPosition === 'after_fusion' ? '統合後' : '-');
+        const rerankEnabledStr = mas?.rerankEnabled ? '有効' : '無効';
+
+        history.results.forEach((result) => {
+          rows.push([
+            result.condition_id.toString(),
+            history.embedding_model,
+            history.llm_model,
+            history.promptName || 'デフォルト',
+            result.metrics.ndcg_10.toFixed(4),
+            result.metrics.precision_10.toFixed(4),
+            result.metrics.recall_10.toFixed(4),
+            result.metrics.mrr.toFixed(4),
+            multiAxisStr,
+            fusionStr,
+            materialWeight,
+            methodWeight,
+            combinedWeight,
+            rerankPosStr,
+            rerankEnabledStr,
+            history.timestamp.toISOString()
+          ]);
+        });
+      });
+
+      // BOM付きUTF-8でCSVを生成（Excelで文字化けを防ぐ）
+      const BOM = '\uFEFF';
+      const csv = BOM + [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `evaluation_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      console.error('CSV出力エラー:', err);
+      setError('CSVファイルの出力に失敗しました');
+    }
+  };
+
   // プロンプト名が変更されたときに保存済みプロンプトをロードする
   useEffect(() => {
     const loadSelectedPrompt = async () => {
-      // デフォルトやカスタムの場合はロードしない
-      if (promptName === 'デフォルト' || promptName === 'カスタム' || !promptName) {
+      // デフォルトの場合はカスタムプロンプトをクリア
+      if (promptName === 'デフォルト') {
+        setCustomPrompts({});
+        return;
+      }
+
+      // カスタムや空の場合はロードしない
+      if (promptName === 'カスタム' || !promptName) {
+        return;
+      }
+
+      // 認証情報がない場合はスキップ
+      if (!idToken || !currentTeamId) {
         return;
       }
 
@@ -460,8 +600,8 @@ export default function EvaluatePage() {
       }
 
       try {
-        // バックエンドからプロンプトをロード
-        const result = await api.loadPrompt(savedPrompt.id);
+        // バックエンドからプロンプトをロード（認証情報を渡す）
+        const result = await api.loadPrompt(savedPrompt.id, idToken, currentTeamId);
         if (result.success && result.prompts) {
           setCustomPrompts(result.prompts);
           console.log(`プロンプト「${promptName}」をロードしました`);
@@ -472,7 +612,7 @@ export default function EvaluatePage() {
     };
 
     loadSelectedPrompt();
-  }, [promptName, savedPromptsList]);
+  }, [promptName, savedPromptsList, idToken, currentTeamId]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -538,12 +678,179 @@ export default function EvaluatePage() {
                 onChange={(e) => setLlmModel(e.target.value)}
                 className="w-full border border-gray-300 rounded-md p-2"
               >
-                <option value="gpt-4o-mini">gpt-4o-mini</option>
-                <option value="gpt-4o">gpt-4o</option>
-                <option value="gpt-4-turbo">gpt-4-turbo</option>
-                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                <optgroup label="GPT-5 シリーズ（最新）">
+                  <option value="gpt-5.2">gpt-5.2（高精度）</option>
+                  <option value="gpt-5.2-pro">gpt-5.2-pro（最高精度）</option>
+                  <option value="gpt-5-mini">gpt-5-mini（コスト効率）</option>
+                  <option value="gpt-5-nano">gpt-5-nano（高速）</option>
+                </optgroup>
+                <optgroup label="GPT-4 シリーズ">
+                  <option value="gpt-4o-mini">gpt-4o-mini（推奨）</option>
+                  <option value="gpt-4o">gpt-4o</option>
+                  <option value="gpt-4-turbo">gpt-4-turbo</option>
+                </optgroup>
+                <optgroup label="GPT-3.5">
+                  <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                </optgroup>
               </select>
             </div>
+          </div>
+
+          {/* v3.1.0: 3軸分離検索設定 */}
+          <div className="border-t border-gray-200 pt-4 mt-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold">3軸分離検索設定</h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={multiAxisEnabled}
+                  onChange={(e) => setMultiAxisEnabled(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">{multiAxisEnabled ? '有効' : '無効'}</span>
+              </label>
+            </div>
+
+            {multiAxisEnabled && (
+              <div className="space-y-4 bg-gray-50 rounded-lg p-4">
+                {/* 統合方式 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">スコア統合方式</label>
+                    <select
+                      value={fusionMethod}
+                      onChange={(e) => setFusionMethod(e.target.value as 'rrf' | 'linear')}
+                      className="w-full border border-gray-300 rounded-md p-2"
+                    >
+                      <option value="rrf">RRF (Reciprocal Rank Fusion)</option>
+                      <option value="linear">線形結合</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {fusionMethod === 'rrf'
+                        ? 'ランク位置に基づくスコア統合（推奨）'
+                        : '各軸のスコアを重み付け合計'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">リランク位置</label>
+                    <select
+                      value={rerankPosition}
+                      onChange={(e) => setRerankPosition(e.target.value as 'per_axis' | 'after_fusion')}
+                      className="w-full border border-gray-300 rounded-md p-2"
+                      disabled={!rerankEnabled}
+                    >
+                      <option value="after_fusion">統合後にリランク（推奨）</option>
+                      <option value="per_axis">各軸でリランク後に統合</option>
+                    </select>
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="checkbox"
+                        id="rerankEnabled"
+                        checked={rerankEnabled}
+                        onChange={(e) => setRerankEnabled(e.target.checked)}
+                        className="w-4 h-4"
+                      />
+                      <label htmlFor="rerankEnabled" className="text-xs text-gray-600">
+                        Cohereリランキングを使用
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 軸ウエイト */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">軸ウエイト設定</label>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">
+                        材料軸: {axisWeights.material.toFixed(2)}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={axisWeights.material}
+                        onChange={(e) => {
+                          const newMaterial = Math.round(parseFloat(e.target.value) * 100) / 100;
+                          const remaining = Math.round((1 - newMaterial) * 100) / 100;
+                          const ratio = axisWeights.method + axisWeights.combined > 0
+                            ? axisWeights.method / (axisWeights.method + axisWeights.combined)
+                            : 0.5;
+                          const newMethod = Math.round(remaining * ratio * 100) / 100;
+                          const newCombined = Math.round((remaining - newMethod) * 100) / 100;
+                          setAxisWeights({
+                            material: newMaterial,
+                            method: newMethod,
+                            combined: newCombined,
+                          });
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">
+                        方法軸: {axisWeights.method.toFixed(2)}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={axisWeights.method}
+                        onChange={(e) => {
+                          const newMethod = Math.round(parseFloat(e.target.value) * 100) / 100;
+                          const remaining = Math.round((1 - newMethod) * 100) / 100;
+                          const ratio = axisWeights.material + axisWeights.combined > 0
+                            ? axisWeights.material / (axisWeights.material + axisWeights.combined)
+                            : 0.5;
+                          const newMaterial = Math.round(remaining * ratio * 100) / 100;
+                          const newCombined = Math.round((remaining - newMaterial) * 100) / 100;
+                          setAxisWeights({
+                            material: newMaterial,
+                            method: newMethod,
+                            combined: newCombined,
+                          });
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">
+                        総合軸: {axisWeights.combined.toFixed(2)}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={axisWeights.combined}
+                        onChange={(e) => {
+                          const newCombined = Math.round(parseFloat(e.target.value) * 100) / 100;
+                          const remaining = Math.round((1 - newCombined) * 100) / 100;
+                          const ratio = axisWeights.material + axisWeights.method > 0
+                            ? axisWeights.material / (axisWeights.material + axisWeights.method)
+                            : 0.5;
+                          const newMaterial = Math.round(remaining * ratio * 100) / 100;
+                          const newMethod = Math.round((remaining - newMaterial) * 100) / 100;
+                          setAxisWeights({
+                            material: newMaterial,
+                            method: newMethod,
+                            combined: newCombined,
+                          });
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    合計: {(axisWeights.material + axisWeights.method + axisWeights.combined).toFixed(2)}
+                    （自動調整で1.0になります）
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* プロンプト編集セクション */}
@@ -704,24 +1011,16 @@ export default function EvaluatePage() {
         {/* 評価履歴セクション */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold">評価履歴（最新5件）</h2>
+            <h2 className="text-xl font-bold">評価履歴（最新50件）</h2>
             <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  const data = localStorage.getItem('evaluation_histories');
-                  console.log('📊 LocalStorage評価履歴:', data);
-                  if (data) {
-                    const parsed = JSON.parse(data);
-                    console.log('パース後:', parsed);
-                    alert(`評価履歴: ${parsed.length}件\n\n詳細はコンソールを確認してください`);
-                  } else {
-                    alert('評価履歴がありません');
-                  }
-                }}
-                className="text-xs px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+              <Button
+                variant="secondary"
+                onClick={exportToCSV}
+                disabled={evaluationHistories.length === 0}
+                className="text-sm"
               >
-                🔍 データ確認
-              </button>
+                CSV出力
+              </Button>
               <button
                 onClick={() => {
                   if (confirm('評価履歴を全て削除しますか？')) {
@@ -732,7 +1031,7 @@ export default function EvaluatePage() {
                 }}
                 className="text-xs px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200"
               >
-                🗑️ 履歴削除
+                履歴削除
               </button>
             </div>
           </div>
@@ -820,17 +1119,6 @@ export default function EvaluatePage() {
                   {/* 展開部分 */}
                   {expandedHistoryId === history.id && (
                     <div className="border-t border-gray-200 p-4 bg-gray-50">
-                      {/* デバッグ情報 */}
-                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
-                        <p className="font-bold mb-1">デバッグ情報:</p>
-                        <p>履歴ID: {history.id}</p>
-                        <p>results配列: {history.results ? `${history.results.length}件` : '存在しない'}</p>
-                        <p>promptName: {history.promptName || '未設定'}</p>
-                        {history.results && history.results.length > 0 && (
-                          <p>最初の結果のcondition_id: {history.results[0].condition_id}</p>
-                        )}
-                      </div>
-
                       <div className="space-y-4">
                         {history.results && history.results.length > 0 ? (
                           history.results.map((result) => (
@@ -839,48 +1127,6 @@ export default function EvaluatePage() {
                               className="border border-gray-200 rounded-lg p-4 bg-white"
                             >
                               <h4 className="font-bold text-sm mb-3">条件 {result.condition_id}</h4>
-
-                              {/* 条件の詳細情報 */}
-                              {result.condition_details && (
-                                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
-                                  <h5 className="font-semibold text-xs mb-2 text-blue-900">入力条件</h5>
-                                  <div className="space-y-2 text-xs">
-                                    {result.condition_details.目的 && (
-                                      <div>
-                                        <span className="font-semibold text-gray-700">目的: </span>
-                                        <span className="text-gray-600">{result.condition_details.目的}</span>
-                                      </div>
-                                    )}
-                                    {result.condition_details.材料 && (
-                                      <div>
-                                        <span className="font-semibold text-gray-700">材料: </span>
-                                        <span className="text-gray-600 whitespace-pre-wrap">{result.condition_details.材料}</span>
-                                      </div>
-                                    )}
-                                    {result.condition_details.実験手順 && (
-                                      <div>
-                                        <span className="font-semibold text-gray-700">実験手順: </span>
-                                        <span className="text-gray-600 whitespace-pre-wrap">{result.condition_details.実験手順}</span>
-                                      </div>
-                                    )}
-                                    {result.condition_details.重点指示 && (
-                                      <div>
-                                        <span className="font-semibold text-gray-700">重点指示: </span>
-                                        <span className="text-gray-600">{result.condition_details.重点指示}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* 古いデータの場合の警告 */}
-                              {!result.condition_details && (
-                                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
-                                  <p className="text-xs text-yellow-800">
-                                    ⚠️ この評価は古い形式で保存されています。入力条件の詳細情報を確認するには、再度評価を実行してください。
-                                  </p>
-                                </div>
-                              )}
 
                             {/* 指標 */}
                             <div className="grid grid-cols-4 gap-2 text-xs mb-3">

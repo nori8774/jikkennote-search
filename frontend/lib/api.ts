@@ -38,8 +38,20 @@ export interface SearchRequest {
   cohere_api_key: string;
   embedding_model?: string;
   llm_model?: string;
+  // v3.0: 2段階モデル選択
+  search_llm_model?: string;  // 検索・判定用LLM
+  summary_llm_model?: string;  // 要約生成用LLM
+  // v3.0.1: ハイブリッド検索
+  search_mode?: 'semantic' | 'keyword' | 'hybrid';  // 検索モード
+  hybrid_alpha?: number;  // ハイブリッド検索のセマンティック重み（0.0-1.0）
   custom_prompts?: Record<string, string>;
   evaluation_mode?: boolean;  // 評価モード（True: 比較省略、Top10返却）
+  // v3.1.0: 3軸分離検索設定
+  multi_axis_enabled?: boolean;  // 3軸検索の有効/無効
+  fusion_method?: 'rrf' | 'linear';  // スコア統合方式
+  axis_weights?: { material: number; method: number; combined: number };  // 各軸のウエイト
+  rerank_position?: 'per_axis' | 'after_fusion';  // リランク位置
+  rerank_enabled?: boolean;  // リランキングの有効/無効
 }
 
 export interface SearchResponse {
@@ -120,6 +132,7 @@ export interface DictionaryEntry {
   variants: string[];
   category?: string;
   note?: string;
+  suffix_equivalents?: string[][];  // サフィックス同等グループ（v3.1.2）
   created_at?: string;
   updated_at?: string;
 }
@@ -145,6 +158,71 @@ export interface DictionaryUpdateResponse {
   updated_entries: number;
 }
 
+// ============================================
+// 実験者プロファイル（v3.2.0）
+// ============================================
+
+export interface ExperimenterProfile {
+  experimenter_id: string;
+  name: string;
+  suffix_conventions?: string[][];
+  material_shortcuts?: Record<string, string>;
+  learned_from?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ExperimenterProfilesResponse {
+  success: boolean;
+  profiles: ExperimenterProfile[];
+  id_pattern: string;
+}
+
+export interface ExperimenterProfileDetailResponse {
+  success: boolean;
+  profile?: ExperimenterProfile;
+  error?: string;
+}
+
+export interface CreateExperimenterProfileRequest {
+  experimenter_id: string;
+  name: string;
+  material_shortcuts?: Record<string, string>;
+  suffix_conventions?: string[][];
+}
+
+export interface UpdateExperimenterProfileRequest {
+  name?: string;
+  material_shortcuts?: Record<string, string>;
+  suffix_conventions?: string[][];
+}
+
+export interface ExperimenterProfileMutationResponse {
+  success: boolean;
+  message: string;
+}
+
+// ============================================
+// 同義語辞書（v3.2.1）
+// ============================================
+
+export interface SynonymGroup {
+  canonical: string;
+  variants: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SynonymGroupsResponse {
+  success: boolean;
+  groups: SynonymGroup[];
+}
+
+export interface SynonymGroupMutationResponse {
+  success: boolean;
+  message: string;
+}
+
 export const api = {
   async search(request: SearchRequest, idToken: string | null = null, teamId: string | null = null): Promise<SearchResponse> {
     const headers = getAuthHeaders(idToken, teamId);
@@ -157,7 +235,7 @@ export const api = {
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new Error('OpenAI APIキーが無効です。設定ページで正しいAPIキー（sk-proj-で始まる）を入力してください。');
+        throw new Error('OpenAI APIキーが無効です。設定ページで正しいAPIキー（sk-で始まる）を入力してください。');
       }
       const errorData = await response.json().catch(() => ({}));
       const errorMessage = errorData.detail || response.statusText;
@@ -228,8 +306,12 @@ export const api = {
     return response.json();
   },
 
-  async getNote(noteId: string): Promise<NoteResponse> {
-    const response = await fetch(`${API_BASE_URL}/notes/${noteId}`);
+  async getNote(noteId: string, idToken: string | null = null, teamId: string | null = null): Promise<NoteResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+
+    const response = await fetch(`${API_BASE_URL}/notes/${noteId}`, {
+      headers,
+    });
 
     if (!response.ok) {
       throw new Error(`Get note failed: ${response.statusText}`);
@@ -479,6 +561,261 @@ export const api = {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.detail || `Reset ChromaDB failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // === 実験者プロファイル管理 APIs（v3.2.0） ===
+
+  /**
+   * 実験者プロファイル一覧を取得
+   */
+  async getExperimenterProfiles(idToken: string | null = null, teamId: string | null = null): Promise<ExperimenterProfilesResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/experimenter-profiles`, { headers });
+
+    if (!response.ok) {
+      throw new Error(`Get experimenter profiles failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 実験者プロファイル詳細を取得
+   */
+  async getExperimenterProfile(experimenterId: string, idToken: string | null = null, teamId: string | null = null): Promise<ExperimenterProfileDetailResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/experimenter-profiles/${encodeURIComponent(experimenterId)}`, { headers });
+
+    if (!response.ok) {
+      throw new Error(`Get experimenter profile failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 実験者プロファイルを作成
+   */
+  async createExperimenterProfile(
+    request: CreateExperimenterProfileRequest,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<ExperimenterProfileMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/experimenter-profiles`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Create experimenter profile failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 実験者プロファイルを更新
+   */
+  async updateExperimenterProfile(
+    experimenterId: string,
+    request: UpdateExperimenterProfileRequest,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<ExperimenterProfileMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/experimenter-profiles/${encodeURIComponent(experimenterId)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Update experimenter profile failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 実験者プロファイルを削除
+   */
+  async deleteExperimenterProfile(
+    experimenterId: string,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<ExperimenterProfileMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/experimenter-profiles/${encodeURIComponent(experimenterId)}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Delete experimenter profile failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * IDパターンを更新
+   */
+  async updateIdPattern(
+    pattern: string,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<ExperimenterProfileMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/experimenter-profiles/id-pattern`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ pattern }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Update ID pattern failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // === 同義語辞書管理 APIs（v3.2.1） ===
+
+  /**
+   * 同義語グループ一覧を取得
+   */
+  async getSynonymGroups(idToken: string | null = null, teamId: string | null = null): Promise<SynonymGroupsResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/synonyms`, { headers });
+
+    if (!response.ok) {
+      throw new Error(`Get synonym groups failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 同義語グループを追加
+   */
+  async addSynonymGroup(
+    canonical: string,
+    variants: string[],
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<SynonymGroupMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/synonyms`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ canonical, variants }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Add synonym group failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 同義語グループを更新
+   */
+  async updateSynonymGroup(
+    canonical: string,
+    updates: { new_canonical?: string; variants?: string[] },
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<SynonymGroupMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/synonyms/${encodeURIComponent(canonical)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Update synonym group failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 同義語グループを削除
+   */
+  async deleteSynonymGroup(
+    canonical: string,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<SynonymGroupMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/synonyms/${encodeURIComponent(canonical)}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Delete synonym group failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 同義語グループにバリアントを追加
+   */
+  async addSynonymVariant(
+    canonical: string,
+    variant: string,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<SynonymGroupMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/synonyms/${encodeURIComponent(canonical)}/variants`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ variant }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Add variant failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * 同義語グループからバリアントを削除
+   */
+  async removeSynonymVariant(
+    canonical: string,
+    variant: string,
+    idToken: string | null = null,
+    teamId: string | null = null
+  ): Promise<SynonymGroupMutationResponse> {
+    const headers = getAuthHeaders(idToken, teamId);
+    const response = await fetch(`${API_BASE_URL}/synonyms/${encodeURIComponent(canonical)}/variants/${encodeURIComponent(variant)}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Remove variant failed: ${response.statusText}`);
     }
 
     return response.json();

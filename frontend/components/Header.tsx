@@ -38,16 +38,16 @@ export default function Header() {
     <header className="bg-primary text-white shadow-md">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          <Link href="/" className="text-xl font-bold hover:opacity-80">
+          <Link href="/" className="text-base font-bold hover:opacity-80 whitespace-nowrap">
             実験ノート検索システム
           </Link>
 
-          <nav className="flex items-center space-x-6">
+          <nav className="flex items-center space-x-4">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`hover:opacity-80 transition-opacity ${
+                className={`text-sm whitespace-nowrap hover:opacity-80 transition-opacity ${
                   pathname === item.href ? 'border-b-2 border-white' : ''
                 }`}
               >
@@ -57,12 +57,12 @@ export default function Header() {
 
             {/* チーム選択ドロップダウン（ログイン時のみ） */}
             {user && teams.length > 0 && (
-              <div className="flex items-center space-x-2">
-                <span className="text-sm">チーム:</span>
+              <div className="flex items-center space-x-1 whitespace-nowrap">
+                <span className="text-xs">チーム:</span>
                 <select
                   value={currentTeamId || ''}
                   onChange={handleTeamChange}
-                  className="bg-white text-gray-900 rounded px-2 py-1 text-sm"
+                  className="bg-white text-gray-900 rounded px-2 py-1 text-xs"
                 >
                   {teams.map((team) => (
                     <option key={team.id} value={team.id}>
@@ -75,20 +75,20 @@ export default function Header() {
 
             {/* ユーザー情報とログアウトボタン */}
             {user ? (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3 whitespace-nowrap">
                 <div className="flex items-center space-x-2">
                   {user.photoURL && (
                     <img
                       src={user.photoURL}
                       alt={user.displayName || 'User'}
-                      className="w-8 h-8 rounded-full"
+                      className="w-6 h-6 rounded-full"
                     />
                   )}
-                  <span className="text-sm">{user.displayName || user.email}</span>
+                  <span className="text-xs max-w-[80px] truncate">{user.displayName || user.email}</span>
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="text-sm hover:opacity-80 transition-opacity border border-white px-3 py-1 rounded"
+                  className="text-xs hover:opacity-80 transition-opacity border border-white px-2 py-1 rounded whitespace-nowrap"
                 >
                   ログアウト
                 </button>
@@ -96,7 +96,7 @@ export default function Header() {
             ) : (
               <Link
                 href="/login"
-                className="text-sm hover:opacity-80 transition-opacity border border-white px-3 py-1 rounded"
+                className="text-xs hover:opacity-80 transition-opacity border border-white px-2 py-1 rounded whitespace-nowrap"
               >
                 ログイン
               </Link>

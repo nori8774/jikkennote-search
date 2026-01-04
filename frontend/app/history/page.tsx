@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 
 interface SearchHistory {
   id: string;
@@ -25,6 +26,7 @@ interface SearchHistory {
 }
 
 export default function HistoryPage() {
+  const { idToken, currentTeamId } = useAuth();
   const [histories, setHistories] = useState<SearchHistory[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<SearchHistory | null>(null);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -55,7 +57,7 @@ export default function HistoryPage() {
     setSelectedNoteId(noteId);
 
     try {
-      const response = await api.getNote(noteId);
+      const response = await api.getNote(noteId, idToken, currentTeamId);
 
       if (!response.success || !response.note) {
         setError(response.error || 'ノートの読み込みに失敗しました');

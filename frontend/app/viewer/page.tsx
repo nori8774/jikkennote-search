@@ -1,41 +1,51 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Button from '@/components/Button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 
 function ViewerContent() {
+  const { idToken, currentTeamId } = useAuth();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [noteId, setNoteId] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [copySuccess, setCopySuccess] = useState('');
   const [sections, setSections] = useState<{
     purpose?: string;
     materials?: string;
     methods?: string;
     results?: string;
   }>({});
+  // v3.2.2: 現在表示中のノートIDを追跡
+  const [displayedNoteId, setDisplayedNoteId] = useState('');
+
+  // v3.2.2: URLパラメータからの初期ID取得用の状態を追加
+  const [initialId, setInitialId] = useState<string | null>(null);
 
   // URLパラメータからIDを取得して自動表示
   useEffect(() => {
     const id = searchParams.get('id');
-    if (id) {
+    if (id && id !== initialId) {
+      setInitialId(id);
       setNoteId(id);
       handleLoadById(id);
     }
-  }, [searchParams]);
+  }, [searchParams, initialId]);
 
   const handleLoadById = async (id: string) => {
     setError('');
     setLoading(true);
 
     try {
-      const response = await api.getNote(id);
+      const response = await api.getNote(id, idToken, currentTeamId);
 
       if (!response.success || !response.note) {
         setError(response.error || 'ノートの読み込みに失敗しました');
@@ -44,6 +54,7 @@ function ViewerContent() {
 
       setNoteContent(response.note.content);
       setSections(response.note.sections);
+      setDisplayedNoteId(id);  // v3.2.2: 表示中のIDを更新
 
     } catch (err: any) {
       setError(err.message || 'ノートの読み込みに失敗しました');
@@ -57,7 +68,7 @@ function ViewerContent() {
     setLoading(true);
 
     try {
-      const response = await api.getNote(noteId);
+      const response = await api.getNote(noteId, idToken, currentTeamId);
 
       if (!response.success || !response.note) {
         setError(response.error || 'ノートの読み込みに失敗しました');
@@ -66,6 +77,7 @@ function ViewerContent() {
 
       setNoteContent(response.note.content);
       setSections(response.note.sections);
+      setDisplayedNoteId(noteId);  // v3.2.2: 表示中のIDを更新
 
     } catch (err: any) {
       setError(err.message || 'ノートの読み込みに失敗しました');
@@ -74,13 +86,30 @@ function ViewerContent() {
     }
   };
 
-  const handleCopySection = (sectionName: string, content?: string) => {
+  // FR-114: クリップボードにコピー
+  const handleCopyToClipboard = (sectionName: string, content?: string) => {
     if (!content) return;
-
-    // TODO: 検索ページの対応するフィールドにコピーする機能を実装
-    // 現在はクリップボードにコピー
     navigator.clipboard.writeText(content);
-    alert(`${sectionName}をクリップボードにコピーしました`);
+    setCopySuccess(`${sectionName}をクリップボードにコピーしました`);
+    setTimeout(() => setCopySuccess(''), 3000);
+  };
+
+  // FR-114: 検索ページに遷移してフォームに反映（v3.2.2: 新しいタブで開く）
+  const copyToSearch = (field: 'purpose' | 'materials' | 'methods' | 'all') => {
+    const params = new URLSearchParams();
+
+    if ((field === 'all' || field === 'purpose') && sections.purpose) {
+      params.set('purpose', sections.purpose);
+    }
+    if ((field === 'all' || field === 'materials') && sections.materials) {
+      params.set('materials', sections.materials);
+    }
+    if ((field === 'all' || field === 'methods') && sections.methods) {
+      params.set('methods', sections.methods);
+    }
+
+    // v3.2.2: 新しいタブで検索ページを開く
+    window.open(`/search?${params.toString()}`, '_blank');
   };
 
   return (
@@ -116,13 +145,34 @@ function ViewerContent() {
               {error}
             </div>
           )}
+
+          {copySuccess && (
+            <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mt-4">
+              {copySuccess}
+            </div>
+          )}
         </div>
 
         {/* ノート表示 */}
         {noteContent && (
           <div className="bg-white rounded-lg shadow-lg p-6">
+            {/* v3.2.2: 入力中のIDと表示中のIDが異なる場合に警告表示 */}
+            {noteId !== displayedNoteId && noteId && (
+              <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-2 rounded mb-4 text-sm">
+                入力中のID「{noteId}」と表示中のノート「{displayedNoteId}」が異なります。
+                「表示」ボタンをクリックして読み込んでください。
+              </div>
+            )}
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">実験ノート {noteId}</h2>
+              <h2 className="text-2xl font-bold">実験ノート {displayedNoteId}</h2>
+              {/* FR-114: 一括コピーボタン */}
+              <Button
+                onClick={() => copyToSearch('all')}
+                className="text-sm"
+                disabled={!sections.purpose && !sections.materials && !sections.methods}
+              >
+                目的・材料・方法を検索条件にコピー
+              </Button>
             </div>
 
             {/* セクション別コピーボタン付き表示 */}
@@ -131,13 +181,24 @@ function ViewerContent() {
                 <div className="border border-gray-300 rounded-lg p-4">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-lg font-bold">目的・背景</h3>
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleCopySection('目的・背景', sections.purpose)}
-                      className="text-sm py-1 px-3"
-                    >
-                      コピー
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => copyToSearch('purpose')}
+                        className="text-sm py-1 px-3"
+                        title="検索ページに移動して目的を設定"
+                      >
+                        検索条件にコピー
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleCopyToClipboard('目的・背景', sections.purpose)}
+                        className="text-sm py-1 px-3"
+                        title="クリップボードにコピー"
+                      >
+                        📋
+                      </Button>
+                    </div>
                   </div>
                   <div className="prose max-w-none">
                     <ReactMarkdown
@@ -154,13 +215,24 @@ function ViewerContent() {
                 <div className="border border-gray-300 rounded-lg p-4">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-lg font-bold">材料</h3>
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleCopySection('材料', sections.materials)}
-                      className="text-sm py-1 px-3"
-                    >
-                      コピー
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => copyToSearch('materials')}
+                        className="text-sm py-1 px-3"
+                        title="検索ページに移動して材料を設定"
+                      >
+                        検索条件にコピー
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleCopyToClipboard('材料', sections.materials)}
+                        className="text-sm py-1 px-3"
+                        title="クリップボードにコピー"
+                      >
+                        📋
+                      </Button>
+                    </div>
                   </div>
                   <div className="prose max-w-none">
                     <ReactMarkdown
@@ -177,13 +249,24 @@ function ViewerContent() {
                 <div className="border border-gray-300 rounded-lg p-4">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-lg font-bold">方法</h3>
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleCopySection('方法', sections.methods)}
-                      className="text-sm py-1 px-3"
-                    >
-                      コピー
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => copyToSearch('methods')}
+                        className="text-sm py-1 px-3"
+                        title="検索ページに移動して方法を設定"
+                      >
+                        検索条件にコピー
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleCopyToClipboard('方法', sections.methods)}
+                        className="text-sm py-1 px-3"
+                        title="クリップボードにコピー"
+                      >
+                        📋
+                      </Button>
+                    </div>
                   </div>
                   <div className="prose max-w-none">
                     <ReactMarkdown
@@ -202,10 +285,11 @@ function ViewerContent() {
                     <h3 className="text-lg font-bold">結果</h3>
                     <Button
                       variant="secondary"
-                      onClick={() => handleCopySection('結果', sections.results)}
+                      onClick={() => handleCopyToClipboard('結果', sections.results)}
                       className="text-sm py-1 px-3"
+                      title="クリップボードにコピー"
                     >
-                      コピー
+                      📋 コピー
                     </Button>
                   </div>
                   <div className="prose max-w-none">

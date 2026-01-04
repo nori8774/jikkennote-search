@@ -29,6 +29,7 @@ class NormalizationEntry:
     variants: List[str]  # 表記揺れのリスト
     category: Optional[str] = None  # カテゴリ（試薬、溶媒、etc）
     note: Optional[str] = None  # メモ
+    suffix_equivalents: Optional[List[List[str]]] = None  # サフィックス同等グループ（v3.1.2）
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -42,6 +43,8 @@ class NormalizationEntry:
             result['category'] = self.category
         if self.note:
             result['note'] = self.note
+        if self.suffix_equivalents:
+            result['suffix_equivalents'] = self.suffix_equivalents
         if self.created_at:
             result['created_at'] = self.created_at
         if self.updated_at:
@@ -88,6 +91,7 @@ class DictionaryManager:
                     variants=item.get('variants', []),
                     category=item.get('category'),
                     note=item.get('note'),
+                    suffix_equivalents=item.get('suffix_equivalents'),
                     created_at=item.get('created_at'),
                     updated_at=item.get('updated_at')
                 )
@@ -167,7 +171,8 @@ class DictionaryManager:
         return self.save()
 
     def update_entry(self, canonical: str, variants: Optional[List[str]] = None,
-                     category: Optional[str] = None, note: Optional[str] = None) -> bool:
+                     category: Optional[str] = None, note: Optional[str] = None,
+                     suffix_equivalents: Optional[List[List[str]]] = None) -> bool:
         """エントリを更新"""
         entry = self.find_entry_by_canonical(canonical)
         if not entry:
@@ -180,6 +185,8 @@ class DictionaryManager:
             entry.category = category
         if note is not None:
             entry.note = note
+        if suffix_equivalents is not None:
+            entry.suffix_equivalents = suffix_equivalents if suffix_equivalents else None
         entry.updated_at = datetime.now().isoformat()
 
         return self.save()
@@ -276,6 +283,187 @@ class DictionaryManager:
         if entry:
             return entry.canonical
         return term
+
+    # ============================================
+    # サフィックス名寄せ機能（v3.1.2）
+    # ============================================
+
+    def get_suffix_map(self, canonical: str) -> Dict[str, str]:
+        """
+        指定されたcanonicalのサフィックス→代表サフィックスのマップを生成
+
+        Args:
+            canonical: 正規化名
+
+        Returns:
+            {"A": "1", "B": "2", ...} のようなマップ
+        """
+        entry = self.find_entry_by_canonical(canonical)
+        if not entry or not entry.suffix_equivalents:
+            return {}
+
+        suffix_map = {}
+        for group in entry.suffix_equivalents:
+            if len(group) < 2:
+                continue
+            representative = group[0]  # 先頭が代表サフィックス
+            for suffix in group:
+                suffix_map[suffix] = representative
+
+        return suffix_map
+
+    def get_all_suffix_maps(self) -> Dict[str, Dict[str, str]]:
+        """
+        全エントリのサフィックスマップを取得
+
+        Returns:
+            {canonical: {suffix: representative, ...}, ...}
+        """
+        result = {}
+        for entry in self.entries:
+            if entry.suffix_equivalents:
+                suffix_map = self.get_suffix_map(entry.canonical)
+                if suffix_map:
+                    result[entry.canonical] = suffix_map
+        return result
+
+    def get_all_canonicals(self) -> List[str]:
+        """全ての正規化名を取得（サフィックス分離用）"""
+        return [entry.canonical for entry in self.entries]
+
+    def extract_base_and_suffix(self, term: str) -> Tuple[Optional[str], str]:
+        """
+        用語からベース名とサフィックスを分離
+
+        Args:
+            term: 分離する用語（例: "HbA1c捕捉抗体A"）
+
+        Returns:
+            (base_name, suffix) または (None, term)
+            例: ("HbA1c捕捉抗体", "A") または (None, "HbA1c捕捉抗体A")
+        """
+        canonicals = self.get_all_canonicals()
+        # 長い順にソート（最長一致のため）
+        canonicals_sorted = sorted(canonicals, key=len, reverse=True)
+
+        for canonical in canonicals_sorted:
+            if term.startswith(canonical) and len(term) > len(canonical):
+                suffix = term[len(canonical):]
+                return (canonical, suffix)
+
+        return (None, term)
+
+    def normalize_with_suffix(self, term: str) -> str:
+        """
+        サフィックスを含む用語を正規化
+
+        Args:
+            term: 正規化する用語（例: "HbA1c捕捉抗体A"）
+
+        Returns:
+            正規化された用語（例: "HbA1c捕捉抗体1"）
+        """
+        # まず通常の正規化を試みる
+        entry = self.find_entry_by_term(term)
+        if entry:
+            # 完全一致する場合はそのまま返す
+            return entry.canonical
+
+        # ベース名とサフィックスに分離
+        base_name, suffix = self.extract_base_and_suffix(term)
+        if base_name is None:
+            return term  # 分離できない場合は元の用語を返す
+
+        # サフィックスマップを取得
+        suffix_map = self.get_suffix_map(base_name)
+        if suffix in suffix_map:
+            normalized_suffix = suffix_map[suffix]
+            return base_name + normalized_suffix
+
+        return term  # マップにない場合は元の用語を返す
+
+    def add_suffix_equivalent(self, canonical: str, group: List[str]) -> bool:
+        """
+        サフィックス同等グループを追加
+
+        Args:
+            canonical: 正規化名
+            group: サフィックスグループ（例: ["1", "A"]）
+
+        Returns:
+            成功したかどうか
+        """
+        entry = self.find_entry_by_canonical(canonical)
+        if not entry:
+            print(f"エントリが見つかりません: {canonical}")
+            return False
+
+        if len(group) < 2:
+            print("グループには2つ以上のサフィックスが必要です")
+            return False
+
+        if entry.suffix_equivalents is None:
+            entry.suffix_equivalents = []
+
+        entry.suffix_equivalents.append(group)
+        entry.updated_at = datetime.now().isoformat()
+        return self.save()
+
+    def remove_suffix_equivalent(self, canonical: str, group_index: int) -> bool:
+        """
+        サフィックス同等グループを削除
+
+        Args:
+            canonical: 正規化名
+            group_index: 削除するグループのインデックス
+
+        Returns:
+            成功したかどうか
+        """
+        entry = self.find_entry_by_canonical(canonical)
+        if not entry:
+            print(f"エントリが見つかりません: {canonical}")
+            return False
+
+        if not entry.suffix_equivalents or group_index >= len(entry.suffix_equivalents):
+            print(f"グループインデックスが範囲外です: {group_index}")
+            return False
+
+        entry.suffix_equivalents.pop(group_index)
+        if len(entry.suffix_equivalents) == 0:
+            entry.suffix_equivalents = None
+
+        entry.updated_at = datetime.now().isoformat()
+        return self.save()
+
+    def update_suffix_equivalent(self, canonical: str, group_index: int, group: List[str]) -> bool:
+        """
+        サフィックス同等グループを更新
+
+        Args:
+            canonical: 正規化名
+            group_index: 更新するグループのインデックス
+            group: 新しいサフィックスグループ
+
+        Returns:
+            成功したかどうか
+        """
+        entry = self.find_entry_by_canonical(canonical)
+        if not entry:
+            print(f"エントリが見つかりません: {canonical}")
+            return False
+
+        if not entry.suffix_equivalents or group_index >= len(entry.suffix_equivalents):
+            print(f"グループインデックスが範囲外です: {group_index}")
+            return False
+
+        if len(group) < 2:
+            print("グループには2つ以上のサフィックスが必要です")
+            return False
+
+        entry.suffix_equivalents[group_index] = group
+        entry.updated_at = datetime.now().isoformat()
+        return self.save()
 
     def export_to_json(self, output_path: Optional[str] = None) -> str:
         """JSON形式でエクスポート"""

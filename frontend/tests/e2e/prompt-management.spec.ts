@@ -110,7 +110,7 @@ test.describe.skip('プロンプト管理機能（認証必須）', () => {
     await customTextarea.fill('カスタマイズした内容');
 
     // リセットボタンをクリック
-    await page.click('button:has-text("初期設定にリセット")').first();
+    await page.locator('button:has-text("初期設定にリセット")').first().click();
 
     // 確認ダイアログを承認
     page.on('dialog', async dialog => {

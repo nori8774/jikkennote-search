@@ -2,7 +2,7 @@
 FastAPI Server for Experiment Notes Search System
 実験ノート検索システムのメインAPIサーバー
 """
-from fastapi import FastAPI, HTTPException, File, UploadFile, Request
+from fastapi import FastAPI, HTTPException, File, UploadFile, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -23,6 +23,8 @@ from storage import storage
 from prompt_manager import PromptManager
 from middleware import AuthMiddleware, TeamMiddleware
 from auth import verify_firebase_token
+from experimenter_profile import get_experimenter_profile_manager
+from synonym_dictionary import get_synonym_dictionary
 import teams
 
 app = FastAPI(
@@ -81,9 +83,19 @@ class SearchRequest(BaseModel):
     openai_api_key: str
     cohere_api_key: str
     embedding_model: Optional[str] = None
-    llm_model: Optional[str] = None
+    llm_model: Optional[str] = None  # 後方互換性のため維持（非推奨）
+    search_llm_model: Optional[str] = None  # v3.0: 検索・判定用LLM
+    summary_llm_model: Optional[str] = None  # v3.0: 要約生成用LLM
+    search_mode: Optional[str] = None  # v3.0.1: "semantic" | "keyword" | "hybrid"
+    hybrid_alpha: Optional[float] = None  # v3.0.1: ハイブリッド検索のセマンティック重み（0.0-1.0）
     custom_prompts: Optional[Dict[str, str]] = None
     evaluation_mode: bool = False  # 評価モード（True: 比較省略、Top10返却）
+    # v3.1.0: 3軸分離検索設定
+    multi_axis_enabled: Optional[bool] = None  # 3軸検索の有効/無効
+    fusion_method: Optional[str] = None  # "rrf" | "linear"
+    axis_weights: Optional[Dict[str, float]] = None  # {"material": 0.3, "method": 0.4, "combined": 0.3}
+    rerank_position: Optional[str] = None  # "per_axis" | "after_fusion"
+    rerank_enabled: Optional[bool] = None  # リランキングの有効/無効
 
 
 class SearchResponse(BaseModel):
@@ -159,6 +171,7 @@ class DictionaryEditRequest(BaseModel):
     variants: Optional[List[str]] = None  # 新しいバリアントリスト
     category: Optional[str] = None  # 新しいカテゴリ
     note: Optional[str] = None  # 新しいメモ
+    suffix_equivalents: Optional[List[List[str]]] = None  # サフィックス同等グループ（v3.1.2）
 
 
 class DictionaryEditResponse(BaseModel):
@@ -171,6 +184,66 @@ class DictionaryDeleteRequest(BaseModel):
 
 
 class DictionaryDeleteResponse(BaseModel):
+    success: bool
+    message: str
+
+
+# サフィックス同等グループ管理（v3.1.2）
+class SuffixEquivalentRequest(BaseModel):
+    canonical: str  # 対象エントリの正規化名
+    group: List[str]  # サフィックスグループ（例: ["1", "A"]）
+
+
+class SuffixEquivalentUpdateRequest(BaseModel):
+    canonical: str  # 対象エントリの正規化名
+    group_index: int  # 更新するグループのインデックス
+    group: List[str]  # 新しいサフィックスグループ
+
+
+class SuffixEquivalentDeleteRequest(BaseModel):
+    canonical: str  # 対象エントリの正規化名
+    group_index: int  # 削除するグループのインデックス
+
+
+class SuffixEquivalentResponse(BaseModel):
+    success: bool
+    message: str
+
+
+# ============================================
+# 実験者プロファイル管理 Request/Response Models（v3.2.0）
+# ============================================
+
+class ExperimenterProfileResponse(BaseModel):
+    success: bool
+    profiles: List[Dict]
+    id_pattern: str
+
+
+class ExperimenterProfileDetailResponse(BaseModel):
+    success: bool
+    profile: Optional[Dict] = None
+    error: Optional[str] = None
+
+
+class CreateExperimenterProfileRequest(BaseModel):
+    experimenter_id: str
+    name: str
+    material_shortcuts: Optional[Dict[str, str]] = None
+    suffix_conventions: Optional[List[List[str]]] = None
+
+
+class UpdateExperimenterProfileRequest(BaseModel):
+    name: Optional[str] = None
+    material_shortcuts: Optional[Dict[str, str]] = None
+    suffix_conventions: Optional[List[List[str]]] = None
+
+
+class UpdateIdPatternRequest(BaseModel):
+    pattern: str
+
+
+class ExperimenterProfileMutationResponse(BaseModel):
     success: bool
     message: str
 
@@ -208,6 +281,17 @@ class EvaluateRequest(BaseModel):
     cohere_api_key: str
     embedding_model: Optional[str] = None
     llm_model: Optional[str] = None
+    search_llm_model: Optional[str] = None  # v3.0: 検索・判定用LLM
+    summary_llm_model: Optional[str] = None  # v3.0: 要約生成用LLM
+    search_mode: Optional[str] = None  # v3.0.1: "semantic" | "keyword" | "hybrid"
+    hybrid_alpha: Optional[float] = None  # v3.0.1: ハイブリッド検索の重み
+    custom_prompts: Optional[Dict[str, str]] = None  # カスタムプロンプト
+    # v3.1.0: 3軸分離検索設定
+    multi_axis_enabled: Optional[bool] = None  # 3軸検索の有効/無効
+    fusion_method: Optional[str] = None  # "rrf" | "linear"
+    axis_weights: Optional[Dict[str, float]] = None  # {"material": 0.3, "method": 0.4, "combined": 0.3}
+    rerank_position: Optional[str] = None  # "per_axis" | "after_fusion"
+    rerank_enabled: Optional[bool] = None  # リランキングの有効/無効
 
 
 class EvaluateResponse(BaseModel):
@@ -223,6 +307,17 @@ class BatchEvaluateRequest(BaseModel):
     cohere_api_key: str
     embedding_model: Optional[str] = None
     llm_model: Optional[str] = None
+    search_llm_model: Optional[str] = None  # v3.0: 検索・判定用LLM
+    summary_llm_model: Optional[str] = None  # v3.0: 要約生成用LLM
+    search_mode: Optional[str] = None  # v3.0.1: "semantic" | "keyword" | "hybrid"
+    hybrid_alpha: Optional[float] = None  # v3.0.1: ハイブリッド検索の重み
+    custom_prompts: Optional[Dict[str, str]] = None  # カスタムプロンプト
+    # v3.1.0: 3軸分離検索設定
+    multi_axis_enabled: Optional[bool] = None  # 3軸検索の有効/無効
+    fusion_method: Optional[str] = None  # "rrf" | "linear"
+    axis_weights: Optional[Dict[str, float]] = None  # {"material": 0.3, "method": 0.4, "combined": 0.3}
+    rerank_position: Optional[str] = None  # "per_axis" | "after_fusion"
+    rerank_enabled: Optional[bool] = None  # リランキングの有効/無効
 
 
 class BatchEvaluateResponse(BaseModel):
@@ -532,19 +627,29 @@ async def get_folder_paths():
 
 @app.post("/search", response_model=SearchResponse)
 async def search_experiments(req_obj: Request, request: SearchRequest):
-    """実験ノート検索（v3.0: マルチテナント対応）"""
+    """実験ノート検索（v3.0: マルチテナント対応、v3.1.0: 3軸分離検索対応）"""
     try:
         # チームIDを取得（v3.0）
         team_id = getattr(req_obj.state, 'team_id', None)
 
-        # エージェント初期化
+        # エージェント初期化（v3.1.0: 3軸分離検索対応）
         agent = SearchAgent(
             openai_api_key=request.openai_api_key,
             cohere_api_key=request.cohere_api_key,
             embedding_model=request.embedding_model,
-            llm_model=request.llm_model,
+            llm_model=request.llm_model,  # 後方互換性
+            search_llm_model=request.search_llm_model,  # v3.0: 検索・判定用LLM
+            summary_llm_model=request.summary_llm_model,  # v3.0: 要約生成用LLM
+            search_mode=request.search_mode,  # v3.0.1: 検索モード
+            hybrid_alpha=request.hybrid_alpha,  # v3.0.1: ハイブリッド検索の重み
             prompts=request.custom_prompts,
-            team_id=team_id  # v3.0: チームID指定
+            team_id=team_id,  # v3.0: チームID指定
+            # v3.1.0: 3軸分離検索設定
+            multi_axis_enabled=request.multi_axis_enabled,
+            fusion_method=request.fusion_method,
+            axis_weights=request.axis_weights,
+            rerank_position=request.rerank_position,
+            rerank_enabled=request.rerank_enabled
         )
 
         # 検索実行
@@ -739,10 +844,15 @@ async def get_note(req_obj: Request, note_id: str):
             return match.group(1).strip() if match else None
 
         sections = {
-            'purpose': extract_section(r'##\s*目的[・･]?背景\s*\n(.*?)(?:\n##|$)', content),
-            'materials': extract_section(r'##\s*材料\s*\n(.*?)(?:\n##|$)', content),
-            'methods': extract_section(r'##\s*方法\s*\n(.*?)(?:\n##|$)', content),
-            'results': extract_section(r'##\s*結果\s*\n(.*?)(?:\n##|$)', content),
+            # v3.2.2: より柔軟なパターンに修正
+            # "## 目的", "## 目的・背景", "## 背景" などに対応
+            'purpose': extract_section(r'##\s*(?:目的|背景)(?:[・･/\s]*(?:目的|背景))?\s*\n(.*?)(?=\n##|\Z)', content),
+            # "## 材料", "## 材料・試薬" などに対応
+            'materials': extract_section(r'##\s*材料(?:[・･/\s]*試薬)?\s*\n(.*?)(?=\n##|\Z)', content),
+            # "## 方法", "## 実験手順", "## 手順", "## 操作" などに対応
+            'methods': extract_section(r'##\s*(?:方法|実験手順|手順|操作)\s*\n(.*?)(?=\n##|\Z)', content),
+            # "## 結果", "## 結果・考察" などに対応
+            'results': extract_section(r'##\s*結果(?:[・･/\s]*考察)?\s*\n(.*?)(?=\n##|\Z)', content),
         }
 
         return NoteResponse(
@@ -1009,7 +1119,8 @@ async def edit_dictionary_entry(request: Request, edit_request: DictionaryEditRe
                 canonical=edit_request.canonical,
                 variants=edit_request.variants,
                 category=edit_request.category,
-                note=edit_request.note
+                note=edit_request.note,
+                suffix_equivalents=edit_request.suffix_equivalents
             )
             if not success:
                 raise HTTPException(status_code=500, detail="エントリの更新に失敗しました")
@@ -1055,6 +1166,503 @@ async def delete_dictionary_entry(request: Request, delete_request: DictionaryDe
     except Exception as e:
         print(f"Error in delete_dictionary_entry: {str(e)}")
         raise HTTPException(status_code=500, detail=f"エントリ削除エラー: {str(e)}")
+
+
+# ============================================
+# サフィックス同等グループ管理エンドポイント（v3.1.2）
+# ============================================
+
+@app.post("/dictionary/suffix-equivalent", response_model=SuffixEquivalentResponse)
+async def add_suffix_equivalent(request: Request, req: SuffixEquivalentRequest):
+    """サフィックス同等グループを追加（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
+
+        # エントリが存在するか確認
+        entry = dict_manager.find_entry_by_canonical(req.canonical)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"エントリが見つかりません: {req.canonical}")
+
+        # グループのバリデーション
+        if len(req.group) < 2:
+            raise HTTPException(status_code=400, detail="グループには2つ以上のサフィックスが必要です")
+
+        # サフィックスグループを追加
+        success = dict_manager.add_suffix_equivalent(req.canonical, req.group)
+        if not success:
+            raise HTTPException(status_code=500, detail="サフィックスグループの追加に失敗しました")
+
+        return SuffixEquivalentResponse(
+            success=True,
+            message=f"サフィックスグループを追加しました: {req.group}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in add_suffix_equivalent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"サフィックスグループ追加エラー: {str(e)}")
+
+
+@app.put("/dictionary/suffix-equivalent", response_model=SuffixEquivalentResponse)
+async def update_suffix_equivalent(request: Request, req: SuffixEquivalentUpdateRequest):
+    """サフィックス同等グループを更新（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
+
+        # エントリが存在するか確認
+        entry = dict_manager.find_entry_by_canonical(req.canonical)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"エントリが見つかりません: {req.canonical}")
+
+        # グループのバリデーション
+        if len(req.group) < 2:
+            raise HTTPException(status_code=400, detail="グループには2つ以上のサフィックスが必要です")
+
+        # サフィックスグループを更新
+        success = dict_manager.update_suffix_equivalent(req.canonical, req.group_index, req.group)
+        if not success:
+            raise HTTPException(status_code=500, detail="サフィックスグループの更新に失敗しました")
+
+        return SuffixEquivalentResponse(
+            success=True,
+            message=f"サフィックスグループを更新しました"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_suffix_equivalent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"サフィックスグループ更新エラー: {str(e)}")
+
+
+@app.delete("/dictionary/suffix-equivalent", response_model=SuffixEquivalentResponse)
+async def delete_suffix_equivalent(request: Request, req: SuffixEquivalentDeleteRequest):
+    """サフィックス同等グループを削除（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        dict_manager = get_dictionary_manager(team_id=team_id)
+
+        # エントリが存在するか確認
+        entry = dict_manager.find_entry_by_canonical(req.canonical)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"エントリが見つかりません: {req.canonical}")
+
+        # サフィックスグループを削除
+        success = dict_manager.remove_suffix_equivalent(req.canonical, req.group_index)
+        if not success:
+            raise HTTPException(status_code=500, detail="サフィックスグループの削除に失敗しました")
+
+        return SuffixEquivalentResponse(
+            success=True,
+            message=f"サフィックスグループを削除しました"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in delete_suffix_equivalent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"サフィックスグループ削除エラー: {str(e)}")
+
+
+# ============================================
+# 実験者プロファイル管理エンドポイント（v3.2.0）
+# ============================================
+
+@app.get("/experimenter-profiles", response_model=ExperimenterProfileResponse)
+async def get_experimenter_profiles(request: Request):
+    """実験者プロファイル一覧を取得（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        profile_manager = get_experimenter_profile_manager(team_id=team_id)
+        profiles = profile_manager.get_all_profiles()
+
+        return ExperimenterProfileResponse(
+            success=True,
+            profiles=profiles,
+            id_pattern=profile_manager.get_id_pattern()
+        )
+
+    except Exception as e:
+        print(f"Error in get_experimenter_profiles: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロファイル取得エラー: {str(e)}")
+
+
+@app.get("/experimenter-profiles/{experimenter_id}", response_model=ExperimenterProfileDetailResponse)
+async def get_experimenter_profile(request: Request, experimenter_id: str):
+    """実験者プロファイル詳細を取得（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        profile_manager = get_experimenter_profile_manager(team_id=team_id)
+        profile = profile_manager.get_profile(experimenter_id)
+
+        if not profile:
+            return ExperimenterProfileDetailResponse(
+                success=False,
+                error=f"プロファイルが見つかりません: {experimenter_id}"
+            )
+
+        return ExperimenterProfileDetailResponse(
+            success=True,
+            profile=profile.to_dict()
+        )
+
+    except Exception as e:
+        print(f"Error in get_experimenter_profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロファイル取得エラー: {str(e)}")
+
+
+@app.post("/experimenter-profiles", response_model=ExperimenterProfileMutationResponse)
+async def create_experimenter_profile(request: Request, req: CreateExperimenterProfileRequest):
+    """実験者プロファイルを作成（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        profile_manager = get_experimenter_profile_manager(team_id=team_id)
+
+        # 既存チェック
+        if profile_manager.get_profile(req.experimenter_id):
+            raise HTTPException(
+                status_code=400,
+                detail=f"プロファイルが既に存在します: {req.experimenter_id}"
+            )
+
+        success = profile_manager.create_profile(
+            experimenter_id=req.experimenter_id,
+            name=req.name,
+            material_shortcuts=req.material_shortcuts,
+            suffix_conventions=req.suffix_conventions
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="プロファイルの作成に失敗しました")
+
+        return ExperimenterProfileMutationResponse(
+            success=True,
+            message=f"プロファイルを作成しました: {req.experimenter_id}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in create_experimenter_profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロファイル作成エラー: {str(e)}")
+
+
+@app.put("/experimenter-profiles/{experimenter_id}", response_model=ExperimenterProfileMutationResponse)
+async def update_experimenter_profile(
+    request: Request,
+    experimenter_id: str,
+    req: UpdateExperimenterProfileRequest
+):
+    """実験者プロファイルを更新（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        profile_manager = get_experimenter_profile_manager(team_id=team_id)
+
+        # 存在チェック
+        if not profile_manager.get_profile(experimenter_id):
+            raise HTTPException(
+                status_code=404,
+                detail=f"プロファイルが見つかりません: {experimenter_id}"
+            )
+
+        success = profile_manager.update_profile(
+            experimenter_id=experimenter_id,
+            name=req.name,
+            material_shortcuts=req.material_shortcuts,
+            suffix_conventions=req.suffix_conventions
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="プロファイルの更新に失敗しました")
+
+        return ExperimenterProfileMutationResponse(
+            success=True,
+            message=f"プロファイルを更新しました: {experimenter_id}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_experimenter_profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロファイル更新エラー: {str(e)}")
+
+
+@app.delete("/experimenter-profiles/{experimenter_id}", response_model=ExperimenterProfileMutationResponse)
+async def delete_experimenter_profile(request: Request, experimenter_id: str):
+    """実験者プロファイルを削除（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        profile_manager = get_experimenter_profile_manager(team_id=team_id)
+
+        # 存在チェック
+        if not profile_manager.get_profile(experimenter_id):
+            raise HTTPException(
+                status_code=404,
+                detail=f"プロファイルが見つかりません: {experimenter_id}"
+            )
+
+        success = profile_manager.delete_profile(experimenter_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="プロファイルの削除に失敗しました")
+
+        return ExperimenterProfileMutationResponse(
+            success=True,
+            message=f"プロファイルを削除しました: {experimenter_id}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in delete_experimenter_profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"プロファイル削除エラー: {str(e)}")
+
+
+@app.put("/experimenter-profiles/id-pattern", response_model=ExperimenterProfileMutationResponse)
+async def update_id_pattern(request: Request, req: UpdateIdPatternRequest):
+    """IDパターンを更新（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        user_id = request.state.user["uid"]
+
+        profile_manager = get_experimenter_profile_manager(team_id=team_id)
+        success = profile_manager.set_id_pattern(req.pattern)
+
+        if not success:
+            raise HTTPException(status_code=400, detail="無効な正規表現パターンです")
+
+        return ExperimenterProfileMutationResponse(
+            success=True,
+            message=f"IDパターンを更新しました: {req.pattern}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_id_pattern: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"IDパターン更新エラー: {str(e)}")
+
+
+# ============================================
+# 同義語辞書管理エンドポイント（v3.2.1）
+# ============================================
+
+class SynonymGroupRequest(BaseModel):
+    canonical: str
+    variants: List[str]
+
+
+class SynonymGroupUpdateRequest(BaseModel):
+    new_canonical: Optional[str] = None
+    variants: Optional[List[str]] = None
+
+
+class SynonymVariantRequest(BaseModel):
+    variant: str
+
+
+class SynonymDictionaryResponse(BaseModel):
+    success: bool
+    groups: Optional[List[Dict]] = None
+    message: Optional[str] = None
+
+
+class SynonymGroupDetailResponse(BaseModel):
+    success: bool
+    group: Optional[Dict] = None
+    message: Optional[str] = None
+
+
+@app.get("/synonyms", response_model=SynonymDictionaryResponse)
+async def get_synonym_groups(request: Request):
+    """同義語辞書の全グループを取得（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+        groups = dictionary.get_all_groups()
+
+        return SynonymDictionaryResponse(
+            success=True,
+            groups=groups
+        )
+
+    except Exception as e:
+        print(f"Error in get_synonym_groups: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"同義語辞書取得エラー: {str(e)}")
+
+
+@app.get("/synonyms/{canonical}", response_model=SynonymGroupDetailResponse)
+async def get_synonym_group(canonical: str, request: Request):
+    """特定の同義語グループを取得（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+        group = dictionary.get_group(canonical)
+
+        if not group:
+            raise HTTPException(status_code=404, detail=f"グループが見つかりません: {canonical}")
+
+        return SynonymGroupDetailResponse(
+            success=True,
+            group=group.to_dict()
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_synonym_group: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"グループ取得エラー: {str(e)}")
+
+
+@app.post("/synonyms", response_model=SynonymDictionaryResponse)
+async def add_synonym_group(req: SynonymGroupRequest, request: Request):
+    """同義語グループを追加（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+
+        success = dictionary.add_group(
+            canonical=req.canonical,
+            variants=req.variants
+        )
+
+        if not success:
+            raise HTTPException(status_code=400, detail=f"グループが既に存在します: {req.canonical}")
+
+        return SynonymDictionaryResponse(
+            success=True,
+            groups=dictionary.get_all_groups(),
+            message=f"グループを追加しました: {req.canonical}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in add_synonym_group: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"グループ追加エラー: {str(e)}")
+
+
+@app.put("/synonyms/{canonical}", response_model=SynonymDictionaryResponse)
+async def update_synonym_group(canonical: str, req: SynonymGroupUpdateRequest, request: Request):
+    """同義語グループを更新（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+
+        success = dictionary.update_group(
+            canonical=canonical,
+            new_canonical=req.new_canonical,
+            variants=req.variants
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"グループが見つかりません: {canonical}")
+
+        return SynonymDictionaryResponse(
+            success=True,
+            groups=dictionary.get_all_groups(),
+            message=f"グループを更新しました: {canonical}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_synonym_group: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"グループ更新エラー: {str(e)}")
+
+
+@app.delete("/synonyms/{canonical}", response_model=SynonymDictionaryResponse)
+async def delete_synonym_group(canonical: str, request: Request):
+    """同義語グループを削除（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+
+        success = dictionary.delete_group(canonical)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"グループが見つかりません: {canonical}")
+
+        return SynonymDictionaryResponse(
+            success=True,
+            groups=dictionary.get_all_groups(),
+            message=f"グループを削除しました: {canonical}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in delete_synonym_group: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"グループ削除エラー: {str(e)}")
+
+
+@app.post("/synonyms/{canonical}/variants", response_model=SynonymDictionaryResponse)
+async def add_synonym_variant(canonical: str, req: SynonymVariantRequest, request: Request):
+    """同義語グループにバリアントを追加（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+
+        success = dictionary.add_variant(canonical, req.variant)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"グループが見つかりません: {canonical}")
+
+        return SynonymDictionaryResponse(
+            success=True,
+            groups=dictionary.get_all_groups(),
+            message=f"バリアントを追加しました: {req.variant} → {canonical}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in add_synonym_variant: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"バリアント追加エラー: {str(e)}")
+
+
+@app.delete("/synonyms/{canonical}/variants/{variant}", response_model=SynonymDictionaryResponse)
+async def delete_synonym_variant(canonical: str, variant: str, request: Request):
+    """同義語グループからバリアントを削除（チーム専用）"""
+    try:
+        team_id = request.headers.get("X-Team-ID")
+        dictionary = get_synonym_dictionary(team_id=team_id)
+
+        success = dictionary.remove_variant(canonical, variant)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"グループが見つかりません: {canonical}")
+
+        return SynonymDictionaryResponse(
+            success=True,
+            groups=dictionary.get_all_groups(),
+            message=f"バリアントを削除しました: {variant}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in delete_synonym_variant: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"バリアント削除エラー: {str(e)}")
 
 
 @app.post("/history", response_model=HistoryResponse)
@@ -1201,7 +1809,7 @@ async def import_test_cases(file: UploadFile = File(...)):
 
 @app.post("/evaluate", response_model=EvaluateResponse)
 async def evaluate_rag(req_obj: Request, request: EvaluateRequest):
-    """RAG性能を評価（v3.0: マルチテナント対応）"""
+    """RAG性能を評価（v3.0: マルチテナント対応、v3.1.0: 3軸分離検索対応）"""
     try:
         # チームIDを取得（v3.0）
         team_id = getattr(req_obj.state, 'team_id', None)
@@ -1213,13 +1821,24 @@ async def evaluate_rag(req_obj: Request, request: EvaluateRequest):
         if not test_case:
             raise HTTPException(status_code=404, detail="テストケースが見つかりません")
 
-        # 検索を実行
+        # 検索を実行（v3.1.0: 3軸分離検索対応）
         agent = SearchAgent(
             openai_api_key=request.openai_api_key,
             cohere_api_key=request.cohere_api_key,
             embedding_model=request.embedding_model,
             llm_model=request.llm_model,
-            team_id=team_id  # v3.0: チームID指定
+            search_llm_model=request.search_llm_model,
+            summary_llm_model=request.summary_llm_model,
+            search_mode=request.search_mode,
+            hybrid_alpha=request.hybrid_alpha,
+            prompts=request.custom_prompts,
+            team_id=team_id,  # v3.0: チームID指定
+            # v3.1.0: 3軸分離検索設定
+            multi_axis_enabled=request.multi_axis_enabled,
+            fusion_method=request.fusion_method,
+            axis_weights=request.axis_weights,
+            rerank_position=request.rerank_position,
+            rerank_enabled=request.rerank_enabled
         )
 
         input_data = {
@@ -1267,7 +1886,7 @@ async def evaluate_rag(req_obj: Request, request: EvaluateRequest):
 
 @app.post("/evaluate/batch", response_model=BatchEvaluateResponse)
 async def batch_evaluate_rag(req_obj: Request, request: BatchEvaluateRequest):
-    """バッチ評価（v3.0: マルチテナント対応）"""
+    """バッチ評価（v3.0: マルチテナント対応、v3.1.0: 3軸分離検索対応）"""
     try:
         # チームIDを取得（v3.0）
         team_id = getattr(req_obj.state, 'team_id', None)
@@ -1282,13 +1901,24 @@ async def batch_evaluate_rag(req_obj: Request, request: BatchEvaluateRequest):
                 print(f"テストケースが見つかりません: {test_case_id}")
                 continue
 
-            # 検索を実行
+            # 検索を実行（v3.1.0: 3軸分離検索対応）
             agent = SearchAgent(
                 openai_api_key=request.openai_api_key,
                 cohere_api_key=request.cohere_api_key,
                 embedding_model=request.embedding_model,
                 llm_model=request.llm_model,
-                team_id=team_id  # v3.0: チームID指定
+                search_llm_model=request.search_llm_model,
+                summary_llm_model=request.summary_llm_model,
+                search_mode=request.search_mode,
+                hybrid_alpha=request.hybrid_alpha,
+                prompts=request.custom_prompts,
+                team_id=team_id,  # v3.0: チームID指定
+                # v3.1.0: 3軸分離検索設定
+                multi_axis_enabled=request.multi_axis_enabled,
+                fusion_method=request.fusion_method,
+                axis_weights=request.axis_weights,
+                rerank_position=request.rerank_position,
+                rerank_enabled=request.rerank_enabled
             )
 
             input_data = {
@@ -1517,17 +2147,39 @@ async def get_chroma_info():
 
 
 @app.post("/chroma/reset", response_model=ChromaDBResetResponse)
-async def reset_chroma_db_endpoint():
-    """ChromaDBを完全にリセット"""
-    try:
-        from chroma_sync import reset_chroma_db
+async def reset_chroma_db_endpoint(
+    authorization: Optional[str] = Header(None),
+    x_team_id: Optional[str] = Header(None, alias="X-Team-ID")
+):
+    """ChromaDBを完全にリセット（v3.1.1: 3コレクション対応）
 
-        success = reset_chroma_db()
+    チームIDが指定されている場合:
+    - materials_collection, methods_collection, combined_collection をすべて削除
+    - 旧形式のコレクション（notes_{team_id}）も削除
+
+    チームIDが指定されていない場合:
+    - 従来通りグローバルChromaDBをリセット
+    """
+    try:
+        from chroma_sync import reset_chroma_db, reset_team_collections
+
+        # チームIDを取得
+        team_id = x_team_id
+
+        if team_id:
+            # v3.1.1: チームの3コレクションをリセット
+            print(f"チーム {team_id} のコレクションをリセット中...")
+            success = reset_team_collections(team_id)
+            message = f"チーム {team_id} のコレクション（materials, methods, combined）をリセットしました。「ChromaDBを再構築」ボタンをクリックして、既存ノートからデータベースを再構築してください。"
+        else:
+            # 従来のグローバルリセット
+            success = reset_chroma_db()
+            message = "ChromaDBをリセットしました。「ChromaDBを再構築」ボタンをクリックして、既存ノートからデータベースを再構築してください。"
 
         if success:
             return ChromaDBResetResponse(
                 success=True,
-                message="ChromaDBをリセットしました。「ChromaDBを再構築」ボタンをクリックして、既存ノートからデータベースを再構築してください。"
+                message=message
             )
         else:
             raise HTTPException(status_code=500, detail="ChromaDBのリセットに失敗しました")

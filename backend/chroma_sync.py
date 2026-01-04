@@ -264,6 +264,7 @@ def get_team_chroma_vectorstore(team_id: str, embeddings, embedding_model: str =
     Note:
         - コレクション名: `notes_{team_id}`
         - persist_directory: `teams/{team_id}/chroma-db`
+        - v3.1.1: 後方互換性のため維持。3軸検索では get_team_multi_collection_vectorstores() を使用。
     """
     from langchain_chroma import Chroma
 
@@ -311,3 +312,128 @@ def get_team_chroma_vectorstore(team_id: str, embeddings, embedding_model: str =
             print(f"警告: チーム設定の保存に失敗: {e}")
 
     return vectorstore
+
+
+def get_team_multi_collection_vectorstores(team_id: str, embeddings, embedding_model: str = None):
+    """
+    チームごとの3コレクション（材料/方法/総合）のベクトルストアを取得（v3.1.1新規）
+
+    Args:
+        team_id: チームID
+        embeddings: Embedding関数
+        embedding_model: 使用するembeddingモデル名（設定保存用）
+
+    Returns:
+        dict: {
+            "materials": Chroma vectorstore（材料セクション用）,
+            "methods": Chroma vectorstore（方法セクション用）,
+            "combined": Chroma vectorstore（ノート全体用）
+        }
+
+    Note:
+        - コレクション名:
+            - materials_collection_{team_id}
+            - methods_collection_{team_id}
+            - combined_collection_{team_id}
+        - persist_directory: `teams/{team_id}/chroma-db`
+    """
+    from langchain_chroma import Chroma
+
+    # チーム専用のpersist_directory
+    team_chroma_path = storage.get_team_path(team_id, 'chroma')
+
+    # ディレクトリが存在しない場合は作成
+    Path(team_chroma_path).mkdir(parents=True, exist_ok=True)
+
+    # 3つのコレクション名を定義
+    collection_names = {
+        "materials": f"{config.MATERIALS_COLLECTION_NAME}_{team_id}",
+        "methods": f"{config.METHODS_COLLECTION_NAME}_{team_id}",
+        "combined": f"{config.COMBINED_COLLECTION_NAME}_{team_id}"
+    }
+
+    # 各コレクションのvectorstoreを作成
+    vectorstores = {}
+    for key, collection_name in collection_names.items():
+        vectorstores[key] = Chroma(
+            collection_name=collection_name,
+            embedding_function=embeddings,
+            persist_directory=team_chroma_path
+        )
+
+    # embedding モデル設定を保存（チームごとに管理）
+    if embedding_model:
+        config_path = Path(team_chroma_path) / "chroma_db_config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    team_config = json.load(f)
+                    current_model = team_config.get('embedding_model')
+
+                    if current_model and current_model != embedding_model:
+                        print(f"⚠️  警告: チーム {team_id} のembeddingモデルが変更されました: {current_model} -> {embedding_model}")
+            else:
+                team_config = {}
+
+            team_config['embedding_model'] = embedding_model
+            team_config['multi_collection'] = True  # v3.1.1: 3コレクション対応フラグ
+            team_config['updated_at'] = datetime.now().isoformat()
+
+            with open(config_path, 'w') as f:
+                json.dump(team_config, f, indent=2)
+
+        except Exception as e:
+            print(f"警告: チーム設定の保存に失敗: {e}")
+
+    return vectorstores
+
+
+def reset_team_collections(team_id: str):
+    """
+    チームの全コレクションをリセット（v3.1.1新規）
+
+    Args:
+        team_id: チームID
+
+    Returns:
+        bool: リセット成功の可否
+    """
+    import chromadb
+
+    team_chroma_path = storage.get_team_path(team_id, 'chroma')
+
+    try:
+        # ChromaDBクライアントを作成
+        client = chromadb.PersistentClient(path=team_chroma_path)
+
+        # 削除対象のコレクション名
+        collection_names_to_delete = [
+            f"{config.MATERIALS_COLLECTION_NAME}_{team_id}",
+            f"{config.METHODS_COLLECTION_NAME}_{team_id}",
+            f"{config.COMBINED_COLLECTION_NAME}_{team_id}",
+            f"notes_{team_id}"  # 後方互換性: 旧コレクション名も削除
+        ]
+
+        # 各コレクションを削除
+        for collection_name in collection_names_to_delete:
+            try:
+                client.delete_collection(name=collection_name)
+                print(f"コレクションを削除: {collection_name}")
+            except Exception:
+                # コレクションが存在しない場合は無視
+                pass
+
+        # 設定ファイルを更新（multi_collectionフラグをリセット）
+        config_path = Path(team_chroma_path) / "chroma_db_config.json"
+        if config_path.exists():
+            os.remove(config_path)
+            print(f"設定ファイルを削除: {config_path}")
+
+        print(f"チーム {team_id} のコレクションをリセット完了")
+        return True
+
+    except Exception as e:
+        print(f"コレクションリセットエラー: {e}")
+        return False

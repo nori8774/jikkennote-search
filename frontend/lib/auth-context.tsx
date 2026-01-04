@@ -3,8 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   User,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   GoogleAuthProvider
@@ -98,20 +97,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 認証状態の監視
   useEffect(() => {
-    // リダイレクト後の認証結果を取得（必須）
-    console.log('🔍 Calling getRedirectResult...');
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result) {
-          console.log('✅ Redirect login successful:', result.user.email);
-        } else {
-          console.log('ℹ️ No redirect result (user probably did not just log in)');
-        }
-      })
-      .catch((error) => {
-        console.error('❌ getRedirectResult error:', error.code, error.message);
-      });
-
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('🔍 onAuthStateChanged triggered:', firebaseUser ? firebaseUser.email : 'No user');
       setUser(firebaseUser);
@@ -159,16 +144,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // Googleログイン
+  // Googleログイン（ポップアップ方式）
   const login = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      console.log('🔍 Calling signInWithRedirect...');
-      await signInWithRedirect(auth, provider);
-      console.log('✅ signInWithRedirect called (redirecting to Google...)');
-      // リダイレクト後、onAuthStateChangedで自動的に処理される
-    } catch (error) {
-      console.error('❌ Login error:', error);
+      console.log('🔍 Calling signInWithPopup...');
+      const result = await signInWithPopup(auth, provider);
+      console.log('✅ Login successful:', result.user.email);
+      // onAuthStateChangedで自動的に処理される
+    } catch (error: any) {
+      console.error('❌ Login error:', error.code, error.message);
       throw error;
     }
   };

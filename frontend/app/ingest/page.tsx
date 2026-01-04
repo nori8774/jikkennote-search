@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Button from '@/components/Button';
+import FileDropZone from '@/components/FileDropZone';
 import { api, DictionaryUpdateRequest } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useAuth } from '@/lib/auth-context';
@@ -129,8 +130,7 @@ export default function IngestPage() {
     }
   };
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
+  const handleUpload = async (files: FileList) => {
     if (!files || files.length === 0) {
       return;
     }
@@ -144,8 +144,6 @@ export default function IngestPage() {
 
       if (response.success) {
         setUploadSuccess(`${response.uploaded_files.length}件のファイルをアップロードしました: ${response.uploaded_files.join(', ')}`);
-        // ファイル入力をリセット
-        event.target.value = '';
       }
     } catch (err: any) {
       setUploadError(err.message || 'ファイルのアップロードに失敗しました');
@@ -277,46 +275,28 @@ export default function IngestPage() {
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
           <h2 className="text-xl font-bold mb-4">📤 ファイルアップロード</h2>
           <p className="text-sm text-gray-700 mb-4">
-            Markdownファイル(.md)を選択してアップロードしてください。
+            Markdownファイル(.md)をドラッグ&ドロップ、またはクリックしてアップロードしてください。
             アップロードされたファイルは自動的にnotes/newフォルダに保存されます。
           </p>
 
-          <div className="space-y-4">
-            <div>
-              <input
-                type="file"
-                accept=".md"
-                multiple
-                onChange={handleUpload}
-                disabled={uploadLoading || loading || analyzing}
-                className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                複数ファイルを同時に選択できます。Markdownファイル(.md)のみアップロード可能です。
-              </p>
+          <FileDropZone
+            onFilesSelected={handleUpload}
+            accept=".md"
+            multiple={true}
+            disabled={loading || analyzing}
+            loading={uploadLoading}
+          />
+
+          {uploadError && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
+              {uploadError}
             </div>
-
-            {uploadLoading && (
-              <div className="flex items-center gap-2 text-primary">
-                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>アップロード中...</span>
-              </div>
-            )}
-
-            {uploadError && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                {uploadError}
-              </div>
-            )}
-            {uploadSuccess && (
-              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-                {uploadSuccess}
-              </div>
-            )}
-          </div>
+          )}
+          {uploadSuccess && (
+            <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mt-4">
+              {uploadSuccess}
+            </div>
+          )}
         </div>
 
         {/* 設定フォーム */}

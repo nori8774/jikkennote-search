@@ -91,6 +91,75 @@ export default function TeamsPage() {
     }
   };
 
+  const handleDeleteTeam = async (teamId: string, teamName: string) => {
+    if (!confirm(`チーム「${teamName}」を削除しますか？\n\n警告: この操作は取り消せません。チーム内のすべてのデータ（ノート、辞書、プロンプトなど）が削除されます。`)) {
+      return;
+    }
+
+    // 二重確認
+    const confirmText = prompt(`削除を確定するには、チーム名「${teamName}」を入力してください:`);
+    if (confirmText !== teamName) {
+      alert('チーム名が一致しません。削除をキャンセルしました。');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/teams/${teamId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        await refreshTeams();
+        alert(`チーム「${teamName}」を削除しました。`);
+      } else {
+        setError(data.detail || 'チーム削除に失敗しました');
+      }
+    } catch (err) {
+      setError('チーム削除エラー: ' + String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLeaveTeam = async (teamId: string, teamName: string) => {
+    if (!confirm(`チーム「${teamName}」から脱退しますか？`)) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/teams/${teamId}/leave`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        await refreshTeams();
+        alert(`チーム「${teamName}」から脱退しました。`);
+      } else {
+        setError(data.detail || 'チーム脱退に失敗しました');
+      }
+    } catch (err) {
+      setError('チーム脱退エラー: ' + String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -120,7 +189,7 @@ export default function TeamsPage() {
               {teams.map((team) => (
                 <li
                   key={team.id}
-                  className={`p-3 border rounded ${
+                  className={`p-4 border rounded ${
                     team.id === currentTeamId
                       ? 'border-blue-500 bg-blue-50'
                       : 'border-gray-200'
@@ -130,10 +199,36 @@ export default function TeamsPage() {
                     <div>
                       <p className="font-medium">{team.name}</p>
                       <p className="text-sm text-gray-500">役割: {team.role}</p>
+                      {team.inviteCode && team.role === 'owner' && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          招待コード: <code className="bg-gray-100 px-1 rounded">{team.inviteCode}</code>
+                        </p>
+                      )}
                     </div>
-                    {team.id === currentTeamId && (
-                      <span className="text-sm text-blue-600 font-medium">選択中</span>
-                    )}
+                    <div className="flex items-center space-x-2">
+                      {team.id === currentTeamId && (
+                        <span className="text-sm text-blue-600 font-medium">選択中</span>
+                      )}
+                      {/* オーナーは削除可能、メンバーは脱退可能 */}
+                      {team.role === 'owner' ? (
+                        <button
+                          onClick={() => handleDeleteTeam(team.id, team.name)}
+                          disabled={loading}
+                          className="text-xs text-red-600 hover:text-red-800 border border-red-300 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50"
+                        >
+                          削除
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleLeaveTeam(team.id, team.name)}
+                          disabled={loading || teams.length <= 1}
+                          className="text-xs text-gray-600 hover:text-gray-800 border border-gray-300 px-2 py-1 rounded hover:bg-gray-50 disabled:opacity-50"
+                          title={teams.length <= 1 ? '最後のチームからは脱退できません' : ''}
+                        >
+                          脱退
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </li>
               ))}

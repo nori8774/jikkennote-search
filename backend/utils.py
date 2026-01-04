@@ -76,6 +76,61 @@ def normalize_text(text: str, replace_map: Dict[str, str]) -> str:
     return text
 
 
+def normalize_text_with_suffix(
+    text: str,
+    replace_map: Dict[str, str],
+    suffix_maps: Dict[str, Dict[str, str]],
+    canonicals: List[str]
+) -> str:
+    """
+    サフィックス対応のテキスト正規化（v3.1.2）
+
+    Args:
+        text: 正規化するテキスト
+        replace_map: 通常の正規化マップ（バリアント→canonical）
+        suffix_maps: サフィックスマップ（{canonical: {suffix: representative}}）
+        canonicals: 全ての正規化名リスト
+
+    Returns:
+        正規化されたテキスト
+    """
+    if not text:
+        return ""
+
+    # Step 1: Unicode正規化と単位分離
+    text = unicodedata.normalize('NFKC', text)
+    text = separate_number_and_unit(text)
+
+    # Step 2: 通常のバリアント正規化
+    if replace_map:
+        sorted_keys = sorted(replace_map.keys(), key=len, reverse=True)
+        for key in sorted_keys:
+            if key in text:
+                text = text.replace(key, replace_map[key])
+
+    # Step 3: サフィックス正規化
+    if suffix_maps and canonicals:
+        # 長い順にソート（最長一致）
+        sorted_canonicals = sorted(canonicals, key=len, reverse=True)
+
+        for canonical in sorted_canonicals:
+            if canonical not in suffix_maps:
+                continue
+
+            suffix_map = suffix_maps[canonical]
+            # テキスト内でcanonical + サフィックスのパターンを探す
+            for suffix, representative in suffix_map.items():
+                if suffix == representative:
+                    continue  # 代表サフィックス自身はスキップ
+                old_term = canonical + suffix
+                new_term = canonical + representative
+                if old_term in text:
+                    text = text.replace(old_term, new_term)
+
+    text = remove_redundant_parentheses(text)
+    return text
+
+
 def parse_json_garbage(text: str) -> any:
     """
     AIの返答から JSON 部分だけを無理やり抽出するヘルパー関数

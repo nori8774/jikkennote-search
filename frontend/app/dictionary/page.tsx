@@ -22,6 +22,7 @@ export default function DictionaryPage() {
     variants: [] as string[],
     category: '',
     note: '',
+    suffix_equivalents: [] as string[][],  // サフィックス同等グループ（v3.1.2）
   });
 
   // ファイル入力用のref
@@ -136,6 +137,7 @@ export default function DictionaryPage() {
       variants: [...entry.variants],
       category: entry.category || '',
       note: entry.note || '',
+      suffix_equivalents: entry.suffix_equivalents ? entry.suffix_equivalents.map(g => [...g]) : [],
     });
     setShowEditModal(true);
   };
@@ -172,6 +174,12 @@ export default function DictionaryPage() {
       // メモが変更されている場合
       if (editForm.note !== (editingEntry.note || '')) {
         updates.note = editForm.note;
+      }
+
+      // サフィックス同等グループが変更されている場合（v3.1.2）
+      const originalSuffixes = editingEntry.suffix_equivalents || [];
+      if (JSON.stringify(editForm.suffix_equivalents) !== JSON.stringify(originalSuffixes)) {
+        updates.suffix_equivalents = editForm.suffix_equivalents.length > 0 ? editForm.suffix_equivalents : null;
       }
 
       const response = await api.editDictionaryEntry(
@@ -387,6 +395,25 @@ export default function DictionaryPage() {
                       </div>
                     )}
 
+                    {/* サフィックス同等グループ（v3.1.2） */}
+                    {entry.suffix_equivalents && entry.suffix_equivalents.length > 0 && (
+                      <div className="min-w-[150px]">
+                        <div className="text-sm text-text-secondary mb-1">
+                          サフィックス名寄せ ({entry.suffix_equivalents.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {entry.suffix_equivalents.map((group, gIndex) => (
+                            <span
+                              key={gIndex}
+                              className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm"
+                            >
+                              {group.join(' ↔ ')}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* アクションボタン */}
                     <div className="flex gap-2">
                       <Button
@@ -473,6 +500,64 @@ export default function DictionaryPage() {
                   rows={3}
                   placeholder="補足情報やメモを入力"
                 />
+              </div>
+
+              {/* サフィックス同等グループ（v3.1.2） */}
+              <div className="mb-6">
+                <label className="block text-sm font-bold mb-2">
+                  サフィックス名寄せグループ
+                  <span className="font-normal text-text-secondary ml-2">
+                    （例: 1とA、2とBが同じものを指す場合）
+                  </span>
+                </label>
+
+                {/* 既存グループの表示 */}
+                <div className="space-y-2 mb-3">
+                  {editForm.suffix_equivalents.map((group, index) => (
+                    <div key={index} className="flex items-center gap-2 bg-gray-50 p-2 rounded">
+                      <input
+                        type="text"
+                        className="flex-1 border border-gray-300 rounded-md p-2 text-sm"
+                        value={group.join(', ')}
+                        onChange={(e) => {
+                          const newGroups = [...editForm.suffix_equivalents];
+                          newGroups[index] = e.target.value.split(',').map(s => s.trim()).filter(s => s);
+                          setEditForm({ ...editForm, suffix_equivalents: newGroups });
+                        }}
+                        placeholder="例: 1, A"
+                      />
+                      <button
+                        type="button"
+                        className="text-red-600 hover:text-red-800 px-2"
+                        onClick={() => {
+                          const newGroups = editForm.suffix_equivalents.filter((_, i) => i !== index);
+                          setEditForm({ ...editForm, suffix_equivalents: newGroups });
+                        }}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* グループ追加ボタン */}
+                <button
+                  type="button"
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                  onClick={() => {
+                    setEditForm({
+                      ...editForm,
+                      suffix_equivalents: [...editForm.suffix_equivalents, ['', '']]
+                    });
+                  }}
+                >
+                  + グループを追加
+                </button>
+
+                <p className="text-xs text-text-secondary mt-2">
+                  各グループ内のサフィックスはカンマ区切りで入力してください。
+                  先頭のサフィックスが代表値として使用されます。
+                </p>
               </div>
 
               {/* ボタン */}
